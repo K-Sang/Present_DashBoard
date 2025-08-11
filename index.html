@@ -37,27 +37,25 @@
     </div>
 
     <div class="container" id="video-container">
-        <iframe
-            id="youtube-player"
-            src="video: https://www.youtube.com/embed/Rtacb6pn7vk?si=FhUyLVxir8YewGXp?autoplay=1&mute=1"
-            allow="autoplay; fullscreen"
-            allowfullscreen>
-        </iframe>
+        <div id="youtube-player" style="width: 100%; height: 100%;"></div>
     </div>
 
     <script>
+        const dashboardContainer = document.getElementById('dashboard-container');
+        const videoContainer = document.getElementById('video-container');
+
+        // THỜI GIAN HIỂN THỊ DASHBOARD (ĐƠN VỊ: miligiây)
+        // 2 phút = 120000 ms
+        const dashboardDuration = 10000; // Đang để 10 giây để dễ kiểm tra
+
+        var player;
+        
         // HÀM CHÍNH ĐIỀU KHIỂN LOGIC TRÌNH CHIẾU
         function startShow() {
-            const dashboardContainer = document.getElementById('dashboard-container');
-            const videoContainer = document.getElementById('video-container');
-
-            // THỜI GIAN HIỂN THỊ DASHBOARD (ĐƠN VỊ: miligiây)
-            // 2 phút = 120000 ms
-            const dashboardDuration = 10000;
-            
             // HIỂN THỊ DASHBOARD
             dashboardContainer.classList.add('active');
             videoContainer.classList.remove('active');
+            player.stopVideo(); // Đảm bảo video dừng
 
             console.log('Đang hiển thị Dashboard...');
 
@@ -66,54 +64,56 @@
                 showVideo();
             }, dashboardDuration);
         }
-
+        
         // HÀM HIỂN THỊ VÀ BẮT ĐẦU PHÁT VIDEO
         function showVideo() {
-            const dashboardContainer = document.getElementById('dashboard-container');
-            const videoContainer = document.getElementById('video-container');
-
             dashboardContainer.classList.remove('active');
             videoContainer.classList.add('active');
 
             console.log('Đang phát Video...');
-            
-            // SỬ DỤNG YOUTUBE PLAYER API ĐỂ BẮT ĐẦU PHÁT
-            // VÀ LẮNG NGHE SỰ KIỆN VIDEO KẾT THÚC
+
+            // BẮT ĐẦU PHÁT VIDEO VÀ LẮNG NGHE SỰ KIỆN KẾT THÚC
             if (window.player && window.player.playVideo) {
-                window.player.playVideo();
-            } else {
-                console.error("YouTube Player API chưa sẵn sàng.");
+                player.playVideo();
             }
         }
 
         // KHI VIDEO KẾT THÚC, GỌI HÀM NÀY ĐỂ QUAY LẠI DASHBOARD
         function onPlayerStateChange(event) {
             // event.data === 0 có nghĩa là video đã phát xong
-            if (event.data === 0) {
+            if (event.data === YT.PlayerState.ENDED) {
                 console.log('Video đã kết thúc. Quay lại Dashboard.');
                 startShow();
             }
         }
-
+        
         // TẢI YOUTUBE PLAYER API VÀ KHỞI TẠO TRÌNH PHÁT
-        var player;
         function onYouTubeIframeAPIReady() {
+            // THAY THẾ 'ID_VIDEO_YOUTUBE_CỦA_BẠN' VÀO ĐÂY
+            const videoId = 'Rtacb6pn7vk'; // Ví dụ: 'dQw4w9WgXcQ'
             player = new YT.Player('youtube-player', {
+                videoId: videoId,
+                playerVars: {
+                    'autoplay': 1,
+                    'mute': 1,
+                    'controls': 1,
+                    'fs': 1,
+                    'rel': 0
+                },
                 events: {
+                    'onReady': (event) => {
+                         // GỌI HÀM KHỞI ĐỘNG CHÍNH TẠI ĐÂY
+                        startShow();
+                    },
                     'onStateChange': onPlayerStateChange
                 }
             });
         }
         
-        // SCRIPT NÀY SẼ TỰ ĐỘNG TẢI API KHI TRANG ĐƯỢC TẢI
         var tag = document.createElement('script');
         tag.src = "https://www.youtube.com/iframe_api";
         var firstScriptTag = document.getElementsByTagName('script')[0];
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-        // BẮT ĐẦU VÒNG LẶP KHI TRANG TẢI XONG VÀ API SẴN SÀNG
-        startShow();
     </script>
-
 </body>
 </html>
