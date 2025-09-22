@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trình Chiếu Tự Động Looker & Video</title>
+    <title>Trình Chiếu Tự Động Looker, Hình Ảnh & Video</title>
     <style>
         body, html {
             margin: 0;
@@ -17,16 +17,17 @@
             width: 100%;
             height: 100%;
             display: none;
-        }
-        .container.active {
-            display: flex;
             justify-content: center;
             align-items: center;
         }
-        iframe {
+        .container.active {
+            display: flex;
+        }
+        iframe, img {
             width: 100%;
             height: 100%;
             border: none;
+            object-fit: contain;
         }
     </style>
 </head>
@@ -36,84 +37,126 @@
         <iframe src="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC"></iframe>
     </div>
 
+    <div class="container" id="image-container">
+        <img src="images/4minute.png" alt="Hình ảnh trình chiếu">
+    </div>
+
     <div class="container" id="video-container">
-        <iframe
-            id="youtube-player"
-            src="video: https://www.youtube.com/embed/Rtacb6pn7vk?si=FhUyLVxir8YewGXp?autoplay=1&mute=1"
-            allow="autoplay; fullscreen"
-            allowfullscreen>
-        </iframe>
+        <div id="youtube-player" style="width: 100%; height: 100%;"></div>
     </div>
 
     <script>
+        // CÀI ĐẶT
+        // Bật/tắt trình chiếu hình ảnh (true = bật, false = tắt)
+        const showImage = false;
+        // Thời gian giới hạn cho video (4 phút 10 giây = 250000 ms)
+        const videoTimeLimit = 250000;
+        // Biến để quản lý timer của video
+        let videoTimer = null;
+
+        // CÁC BIẾN CỐ ĐỊNH
+        const dashboardContainer = document.getElementById('dashboard-container');
+        const imageContainer = document.getElementById('image-container');
+        const videoContainer = document.getElementById('video-container');
+
+        const dashboardDuration = 120000; // 2 phút
+        const imageDuration = 240000; // 4 phút
+
+        var player;
+
         // HÀM CHÍNH ĐIỀU KHIỂN LOGIC TRÌNH CHIẾU
         function startShow() {
-            const dashboardContainer = document.getElementById('dashboard-container');
-            const videoContainer = document.getElementById('video-container');
-
-            // THỜI GIAN HIỂN THỊ DASHBOARD (ĐƠN VỊ: miligiây)
-            // 2 phút = 120000 ms
-            const dashboardDuration = 10000;
-            
-            // HIỂN THỊ DASHBOARD
+            // Hiển thị Dashboard
             dashboardContainer.classList.add('active');
+            imageContainer.classList.remove('active');
             videoContainer.classList.remove('active');
+            if (player && player.stopVideo) {
+                player.stopVideo();
+            }
 
             console.log('Đang hiển thị Dashboard...');
 
-            // SAU KHI HẾT THỜI GIAN, CHUYỂN SANG VIDEO
+            // Chuyển đến phần tiếp theo sau khi hết thời gian của Dashboard
             setTimeout(() => {
-                showVideo();
+                if (showImage) {
+                    showImageSection();
+                } else {
+                    showVideoSection();
+                }
             }, dashboardDuration);
         }
 
-        // HÀM HIỂN THỊ VÀ BẮT ĐẦU PHÁT VIDEO
-        function showVideo() {
-            const dashboardContainer = document.getElementById('dashboard-container');
-            const videoContainer = document.getElementById('video-container');
-
+        function showImageSection() {
+            // Hiển thị hình ảnh
             dashboardContainer.classList.remove('active');
+            imageContainer.classList.add('active');
+            videoContainer.classList.remove('active');
+            if (player && player.stopVideo) {
+                player.stopVideo();
+            }
+
+            console.log('Đang hiển thị Hình ảnh...');
+
+            // Chuyển sang video sau khi hết thời gian của hình ảnh
+            setTimeout(() => {
+                showVideoSection();
+            }, imageDuration);
+        }
+
+        function showVideoSection() {
+            // Hiển thị Video
+            dashboardContainer.classList.remove('active');
+            imageContainer.classList.remove('active');
             videoContainer.classList.add('active');
 
             console.log('Đang phát Video...');
-            
-            // SỬ DỤNG YOUTUBE PLAYER API ĐỂ BẮT ĐẦU PHÁT
-            // VÀ LẮNG NGHE SỰ KIỆN VIDEO KẾT THÚC
-            if (window.player && window.player.playVideo) {
-                window.player.playVideo();
-            } else {
-                console.error("YouTube Player API chưa sẵn sàng.");
+
+            if (player && player.playVideo) {
+                player.playVideo();
             }
+
+            // Đặt timer giới hạn cho video
+            videoTimer = setTimeout(() => {
+                console.log('Đã hết thời gian giới hạn cho video, đang chuyển sang phần tiếp theo.');
+                startShow();
+            }, videoTimeLimit);
         }
 
-        // KHI VIDEO KẾT THÚC, GỌI HÀM NÀY ĐỂ QUAY LẠI DASHBOARD
+        // KHI VIDEO KẾT THÚC, QUAY LẠI ĐẦU CHU TRÌNH
         function onPlayerStateChange(event) {
-            // event.data === 0 có nghĩa là video đã phát xong
-            if (event.data === 0) {
+            if (event.data === YT.PlayerState.ENDED) {
                 console.log('Video đã kết thúc. Quay lại Dashboard.');
+                clearTimeout(videoTimer); // Hủy timer giới hạn
                 startShow();
             }
         }
 
         // TẢI YOUTUBE PLAYER API VÀ KHỞI TẠO TRÌNH PHÁT
-        var player;
         function onYouTubeIframeAPIReady() {
+            const videoId = 'Rtacb6pn7vk';
+
             player = new YT.Player('youtube-player', {
+                videoId: videoId,
+                playerVars: {
+                    'autoplay': 1,
+                    'mute': 1,
+                    'controls': 1,
+                    'fs': 1,
+                    'rel': 0
+                },
                 events: {
+                    'onReady': (event) => {
+                        startShow();
+                    },
                     'onStateChange': onPlayerStateChange
                 }
             });
         }
-        
-        // SCRIPT NÀY SẼ TỰ ĐỘNG TẢI API KHI TRANG ĐƯỢC TẢI
+
         var tag = document.createElement('script');
         tag.src = "https://www.youtube.com/iframe_api";
         var firstScriptTag = document.getElementsByTagName('script')[0];
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-        // BẮT ĐẦU VÒNG LẶP KHI TRANG TẢI XONG VÀ API SẴN SÀNG
-        startShow();
     </script>
-
 </body>
 </html>
