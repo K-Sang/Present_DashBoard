@@ -1,162 +1,172 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trình Chiếu Tự Động Looker, Hình Ảnh & Video</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-        }
-        .container {
-            width: 100%;
-            height: 100%;
-            display: none;
-            justify-content: center;
-            align-items: center;
-        }
-        .container.active {
-            display: flex;
-        }
-        iframe, img {
-            width: 100%;
-            height: 100%;
-            border: none;
-            object-fit: contain;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Slideshow: Looker + Ảnh + Video (YouTube 153 Fix)</title>
+  <style>
+    :root { --bg: #ffffff; } /* đổi màu nền nếu muốn */
+    html, body { margin:0; padding:0; width:100vw; height:100vh; overflow:hidden; background:var(--bg); font-family:system-ui,sans-serif; }
+    .container { position:absolute; inset:0; display:none; width:100vw; height:100vh; background:var(--bg); }
+    .container.active { display:block; }
+
+    /* Looker lấp đầy viewport; bản này KHÔNG crop, để Looker tự co theo thiết lập trong report */
+    .dash-wrap { position:relative; width:100%; height:100%; background:var(--bg); }
+    .dash-wrap > iframe { width:100%; height:100%; border:0; display:block; background:var(--bg); }
+
+    /* Ảnh và video */
+    img { width:100%; height:100%; object-fit:contain; display:block; background:var(--bg); }
+    #youtube-iframe { width:100%; height:100%; border:0; display:block; }
+  </style>
 </head>
 <body>
 
-    <div class="container active" id="dashboard-container">
-        <iframe src="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC"></iframe>
+  <!-- DASHBOARD (Looker) -->
+  <div class="container active" id="dashboard">
+    <div class="dash-wrap">
+      <iframe
+        id="dashFrame"
+        data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC?rm=minimal&chromeless=1"
+        allowfullscreen
+      ></iframe>
     </div>
+  </div>
 
-    <div class="container" id="image-container">
-        <img src="images/4minute.png" alt="Hình ảnh trình chiếu">
-    </div>
+  <!-- IMAGE (tuỳ chọn) -->
+  <div class="container" id="image">
+    <img src="images/4minute.png" alt="Slide ảnh">
+  </div>
 
-    <div class="container" id="video-container">
-        <div id="youtube-player" style="width: 100%; height: 100%;"></div>
-    </div>
+  <!-- VIDEO (YouTube) -->
+  <div class="container" id="video">
+    <iframe
+      id="youtube-iframe"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write"
+      title="YouTube video"
+    ></iframe>
+  </div>
 
-    <script>
-        // CÀI ĐẶT
-        // Bật/tắt trình chiếu hình ảnh (true = bật, false = tắt)
-        const showImage = false;
-        // Thời gian giới hạn cho video (4 phút 10 giây = 250000 ms)
-        const videoTimeLimit = 250000;
-        // Biến để quản lý timer của video
-        let videoTimer = null;
+  <script>
+    /* ===== CẤU HÌNH ===== */
+    const SHOW_IMAGE = false;             // bật/tắt màn ảnh
+    const DASHBOARD_DURATION = 120000;    // 2 phút
+    const IMAGE_DURATION = 240000;        // 4 phút
+    const VIDEO_LIMIT_MS = 250000;        // 4m10s fallback
+    const RELOAD_DASH_ON_SHOW = true;     // làm mới Looker khi đến lượt
+    const YT_VIDEO_ID = 'Rtacb6pn7vk';    // ID video
+    const YT_PRIVACY_MODE = false;        // true => youtube-nocookie.com
 
-        // CÁC BIẾN CỐ ĐỊNH
-        const dashboardContainer = document.getElementById('dashboard-container');
-        const imageContainer = document.getElementById('image-container');
-        const videoContainer = document.getElementById('video-container');
+    /* ===== BIẾN ===== */
+    const elDash  = document.getElementById('dashboard');
+    const elImg   = document.getElementById('image');
+    const elVid   = document.getElementById('video');
+    const dashIfr = document.getElementById('dashFrame');
+    const ytIframe= document.getElementById('youtube-iframe');
 
-        const dashboardDuration = 120000; // 2 phút
-        const imageDuration = 240000; // 4 phút
+    let stageTimer = null, videoTimer = null;
+    let player = null, retriedOnce = false;
+    const flow = ['dashboard', ...(SHOW_IMAGE ? ['image'] : []), 'video'];
+    let idx = 0;
 
-        var player;
+    /* ===== TIỆN ÍCH ===== */
+    function setActive(name) {
+      [elDash, elImg, elVid].forEach(el => el.classList.remove('active'));
+      ({dashboard: elDash, image: elImg, video: elVid}[name]).classList.add('active');
+    }
+    function clearTimers() {
+      if (stageTimer) { clearTimeout(stageTimer); stageTimer = null; }
+      if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+    }
+    function reloadDashboard() {
+      const base = dashIfr.dataset.url || dashIfr.src || '';
+      if (!base) return;
+      const sep = base.includes('?') ? '&' : '?';
+      dashIfr.src = `${base}${sep}_ts=${Date.now()}`;
+    }
 
-        // HÀM CHÍNH ĐIỀU KHIỂN LOGIC TRÌNH CHIẾU
-        function startShow() {
-            // Hiển thị Dashboard
-            dashboardContainer.classList.add('active');
-            imageContainer.classList.remove('active');
-            videoContainer.classList.remove('active');
-            if (player && player.stopVideo) {
-                player.stopVideo();
+    /* ===== YOUTUBE INIT (153 fix) ===== */
+    function buildYTUrl() {
+      const host = YT_PRIVACY_MODE ? 'https://www.youtube-nocookie.com' : 'https://www.youtube.com';
+      return (
+        `${host}/embed/${YT_VIDEO_ID}`
+        + `?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1`
+        + `&origin=${encodeURIComponent(window.location.origin)}`
+      );
+    }
+    function loadYouTubeIframe() {
+      ytIframe.src = buildYTUrl();
+    }
+    function ensureYTApi() {
+      return new Promise((resolve) => {
+        if (window.YT && window.YT.Player) return resolve();
+        const s = document.createElement('script');
+        s.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(s);
+        window.onYouTubeIframeAPIReady = () => resolve();
+      });
+    }
+    function initYTPlayer() {
+      player = new YT.Player('youtube-iframe', {
+        events: {
+          onStateChange: (e) => {
+            if (e.data === YT.PlayerState.ENDED) { clearTimers(); next(); }
+          },
+          onError: () => {
+            // Retry 1 lần nếu lỗi (ví dụ 153)
+            if (!retriedOnce) {
+              retriedOnce = true;
+              ytIframe.src = buildYTUrl() + `&ts=${Date.now()}`;
             }
-
-            console.log('Đang hiển thị Dashboard...');
-
-            // Chuyển đến phần tiếp theo sau khi hết thời gian của Dashboard
-            setTimeout(() => {
-                if (showImage) {
-                    showImageSection();
-                } else {
-                    showVideoSection();
-                }
-            }, dashboardDuration);
+          }
         }
+      });
+    }
 
-        function showImageSection() {
-            // Hiển thị hình ảnh
-            dashboardContainer.classList.remove('active');
-            imageContainer.classList.add('active');
-            videoContainer.classList.remove('active');
-            if (player && player.stopVideo) {
-                player.stopVideo();
-            }
+    /* ===== CÁC MÀN ===== */
+    function showDashboard() {
+      clearTimers(); setActive('dashboard');
+      if (player && player.stopVideo) player.stopVideo();
+      if (RELOAD_DASH_ON_SHOW) reloadDashboard();
+      stageTimer = setTimeout(next, DASHBOARD_DURATION);
+    }
+    function showImage() {
+      clearTimers(); setActive('image');
+      if (player && player.stopVideo) player.stopVideo();
+      stageTimer = setTimeout(next, IMAGE_DURATION);
+    }
+    function showVideo() {
+      clearTimers(); setActive('video');
+      retriedOnce = false;
+      if (player && player.playVideo) {
+        try { player.seekTo(0, true); } catch(e) {}
+        player.playVideo();
+      }
+      videoTimer = setTimeout(() => { if (player && player.stopVideo) player.stopVideo(); next(); }, VIDEO_LIMIT_MS);
+    }
 
-            console.log('Đang hiển thị Hình ảnh...');
+    function next() { idx = (idx + 1) % flow.length; run(); }
+    function run() {
+      const name = flow[idx];
+      if (name === 'dashboard') return showDashboard();
+      if (name === 'image')     return showImage();
+      if (name === 'video')     return showVideo();
+    }
 
-            // Chuyển sang video sau khi hết thời gian của hình ảnh
-            setTimeout(() => {
-                showVideoSection();
-            }, imageDuration);
-        }
+    /* ===== BOOT ===== */
+    document.addEventListener('DOMContentLoaded', async () => {
+      // set src cho yt iframe kèm origin (tham số quan trọng cho 153)
+      loadYouTubeIframe();
+      // tải API và khởi tạo player (không chặn slideshow)
+      ensureYTApi().then(initYTPlayer);
+      // bắt đầu vòng trình chiếu
+      idx = 0; run();
+    });
 
-        function showVideoSection() {
-            // Hiển thị Video
-            dashboardContainer.classList.remove('active');
-            imageContainer.classList.remove('active');
-            videoContainer.classList.add('active');
-
-            console.log('Đang phát Video...');
-
-            if (player && player.playVideo) {
-                player.playVideo();
-            }
-
-            // Đặt timer giới hạn cho video
-            videoTimer = setTimeout(() => {
-                console.log('Đã hết thời gian giới hạn cho video, đang chuyển sang phần tiếp theo.');
-                startShow();
-            }, videoTimeLimit);
-        }
-
-        // KHI VIDEO KẾT THÚC, QUAY LẠI ĐẦU CHU TRÌNH
-        function onPlayerStateChange(event) {
-            if (event.data === YT.PlayerState.ENDED) {
-                console.log('Video đã kết thúc. Quay lại Dashboard.');
-                clearTimeout(videoTimer); // Hủy timer giới hạn
-                startShow();
-            }
-        }
-
-        // TẢI YOUTUBE PLAYER API VÀ KHỞI TẠO TRÌNH PHÁT
-        function onYouTubeIframeAPIReady() {
-            const videoId = 'Rtacb6pn7vk';
-
-            player = new YT.Player('youtube-player', {
-                videoId: videoId,
-                playerVars: {
-                    'autoplay': 1,
-                    'mute': 1,
-                    'controls': 1,
-                    'fs': 1,
-                    'rel': 0
-                },
-                events: {
-                    'onReady': (event) => {
-                        startShow();
-                    },
-                    'onStateChange': onPlayerStateChange
-                }
-            });
-        }
-
-        var tag = document.createElement('script');
-        tag.src = "https://www.youtube.com/iframe_api";
-        var firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-    </script>
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && player && player.pauseVideo) player.pauseVideo();
+    });
+  </script>
 </body>
 </html>
