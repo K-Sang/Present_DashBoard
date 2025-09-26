@@ -4,16 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Slideshow: Looker + Ảnh + Video (YouTube 153 Fix)</title>
+  <title>Slideshow: Looker + Ảnh + Video (double-buffer + YT 153 fix)</title>
   <style>
     :root { --bg: #ffffff; } /* đổi màu nền nếu muốn */
     html, body { margin:0; padding:0; width:100vw; height:100vh; overflow:hidden; background:var(--bg); font-family:system-ui,sans-serif; }
     .container { position:absolute; inset:0; display:none; width:100vw; height:100vh; background:var(--bg); }
     .container.active { display:block; }
 
-    /* Looker lấp đầy viewport; bản này KHÔNG crop, để Looker tự co theo thiết lập trong report */
+    /* Looker khung ngoài (giữ 100% viewport, không crop ở đây) */
     .dash-wrap { position:relative; width:100%; height:100%; background:var(--bg); }
-    .dash-wrap > iframe { width:100%; height:100%; border:0; display:block; background:var(--bg); }
+
+    /* ===== Double-buffer stack: 2 iframe chồng nhau, fade mượt ===== */
+    .stack { position:relative; width:100%; height:100%; background:var(--bg); }
+    .stack > iframe {
+      position:absolute; inset:0;
+      width:100%; height:100%; border:0; display:block; background:var(--bg);
+      opacity:0; pointer-events:none; transition: opacity 300ms ease; /* FADE */
+    }
+    .stack > iframe.visible { opacity:1; pointer-events:auto; }
 
     /* Ảnh và video */
     img { width:100%; height:100%; object-fit:contain; display:block; background:var(--bg); }
@@ -22,14 +30,14 @@
 </head>
 <body>
 
-  <!-- DASHBOARD (Looker) -->
+  <!-- DASHBOARD (Looker) – dùng double-buffer -->
   <div class="container active" id="dashboard">
     <div class="dash-wrap">
-      <iframe
-        id="dashFrame"
-        data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC?rm=minimal&chromeless=1"
-        allowfullscreen
-      ></iframe>
+      <div class="stack" id="dashStack"
+           data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC?rm=minimal&chromeless=1">
+        <!-- Iframe hiển thị ban đầu; sẽ được gán src ở DOMContentLoaded -->
+        <iframe class="visible" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
     </div>
   </div>
 
@@ -52,38 +60,65 @@
     /* ===== CẤU HÌNH ===== */
     const SHOW_IMAGE = false;             // bật/tắt màn ảnh
     const DASHBOARD_DURATION = 120000;    // 2 phút
-    const IMAGE_DURATION = 240000;        // 4 phút
-    const VIDEO_LIMIT_MS = 250000;        // 4m10s fallback
-    const RELOAD_DASH_ON_SHOW = true;     // làm mới Looker khi đến lượt
-    const YT_VIDEO_ID = 'Rtacb6pn7vk';    // ID video
+    const IMAGE_DURATION     = 240000;    // 4 phút
+    const VIDEO_LIMIT_MS     = 250000;    // 4m10s fallback
+    const RELOAD_DASH_ON_SHOW = true;     // soft refresh Looker khi tới màn Dashboard
+    const DASH_REFRESH_MS     = 0;        // refresh định kỳ khi đang ở Dashboard (0 = tắt), vd 15*60*1000
+    const FADE_MS             = 300;      // khớp với CSS transition
+
+    const YT_VIDEO_ID     = 'Rtacb6pn7vk';
     const YT_PRIVACY_MODE = false;        // true => youtube-nocookie.com
 
     /* ===== BIẾN ===== */
-    const elDash  = document.getElementById('dashboard');
-    const elImg   = document.getElementById('image');
-    const elVid   = document.getElementById('video');
-    const dashIfr = document.getElementById('dashFrame');
-    const ytIframe= document.getElementById('youtube-iframe');
+    const elDash   = document.getElementById('dashboard');
+    const elImg    = document.getElementById('image');
+    const elVid    = document.getElementById('video');
+    const dashStack= document.getElementById('dashStack');
+    const ytIframe = document.getElementById('youtube-iframe');
 
-    let stageTimer = null, videoTimer = null;
+    let stageTimer = null, videoTimer = null, dashPeriodicTimer = null;
     let player = null, retriedOnce = false;
     const flow = ['dashboard', ...(SHOW_IMAGE ? ['image'] : []), 'video'];
-    let idx = 0;
+    let idx = 0, hasShownDashOnce = false;
 
-    /* ===== TIỆN ÍCH ===== */
+    /* ===== TIỆN ÍCH HIỂN THỊ ===== */
     function setActive(name) {
       [elDash, elImg, elVid].forEach(el => el.classList.remove('active'));
       ({dashboard: elDash, image: elImg, video: elVid}[name]).classList.add('active');
     }
     function clearTimers() {
-      if (stageTimer) { clearTimeout(stageTimer); stageTimer = null; }
-      if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+      if (stageTimer)       { clearTimeout(stageTimer); stageTimer = null; }
+      if (videoTimer)       { clearTimeout(videoTimer); videoTimer = null; }
+      if (dashPeriodicTimer){ clearInterval(dashPeriodicTimer); dashPeriodicTimer = null; }
     }
-    function reloadDashboard() {
-      const base = dashIfr.dataset.url || dashIfr.src || '';
-      if (!base) return;
+
+    function buildUrl(base) {
       const sep = base.includes('?') ? '&' : '?';
-      dashIfr.src = `${base}${sep}_ts=${Date.now()}`;
+      return `${base}${sep}_ts=${Date.now()}`; // cache-buster
+    }
+
+    // ===== DOUBLE-BUFFER cho Looker =====
+    function softRefreshDash() {
+      const base = dashStack.dataset.url || '';
+      if (!base) return;
+
+      const oldIframe = dashStack.querySelector('iframe.visible');
+      const newIframe = document.createElement('iframe');
+      newIframe.setAttribute('allowfullscreen', '');
+      newIframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      newIframe.src = buildUrl(base);
+      dashStack.appendChild(newIframe);
+
+      // Đợi load xong rồi cross-fade
+      newIframe.addEventListener('load', () => {
+        requestAnimationFrame(() => {
+          newIframe.classList.add('visible');
+          if (oldIframe) {
+            oldIframe.classList.remove('visible');
+            setTimeout(() => oldIframe.remove(), FADE_MS + 50);
+          }
+        });
+      }, { once: true });
     }
 
     /* ===== YOUTUBE INIT (153 fix) ===== */
@@ -95,9 +130,7 @@
         + `&origin=${encodeURIComponent(window.location.origin)}`
       );
     }
-    function loadYouTubeIframe() {
-      ytIframe.src = buildYTUrl();
-    }
+    function loadYouTubeIframe() { ytIframe.src = buildYTUrl(); }
     function ensureYTApi() {
       return new Promise((resolve) => {
         if (window.YT && window.YT.Player) return resolve();
@@ -114,7 +147,6 @@
             if (e.data === YT.PlayerState.ENDED) { clearTimers(); next(); }
           },
           onError: () => {
-            // Retry 1 lần nếu lỗi (ví dụ 153)
             if (!retriedOnce) {
               retriedOnce = true;
               ytIframe.src = buildYTUrl() + `&ts=${Date.now()}`;
@@ -126,18 +158,32 @@
 
     /* ===== CÁC MÀN ===== */
     function showDashboard() {
-      clearTimers(); setActive('dashboard');
+      clearTimers();
+      setActive('dashboard');
       if (player && player.stopVideo) player.stopVideo();
-      if (RELOAD_DASH_ON_SHOW) reloadDashboard();
+
+      // Refresh “mềm” khi tới màn Dashboard (trừ lần đầu để tránh chồng tải)
+      if (RELOAD_DASH_ON_SHOW && hasShownDashOnce) softRefreshDash();
+      hasShownDashOnce = true;
+
+      // (tuỳ chọn) refresh định kỳ khi đang hiển thị Dashboard
+      if (DASH_REFRESH_MS > 0) {
+        dashPeriodicTimer = setInterval(softRefreshDash, DASH_REFRESH_MS);
+      }
+
       stageTimer = setTimeout(next, DASHBOARD_DURATION);
     }
+
     function showImage() {
-      clearTimers(); setActive('image');
+      clearTimers();
+      setActive('image');
       if (player && player.stopVideo) player.stopVideo();
       stageTimer = setTimeout(next, IMAGE_DURATION);
     }
+
     function showVideo() {
-      clearTimers(); setActive('video');
+      clearTimers();
+      setActive('video');
       retriedOnce = false;
       if (player && player.playVideo) {
         try { player.seekTo(0, true); } catch(e) {}
@@ -156,14 +202,19 @@
 
     /* ===== BOOT ===== */
     document.addEventListener('DOMContentLoaded', async () => {
-      // set src cho yt iframe kèm origin (tham số quan trọng cho 153)
+      // Nạp nội dung ban đầu cho iframe “visible” (để ngay lập tức có nội dung; các refresh sau dùng softRefreshDash)
+      const first = dashStack.querySelector('iframe.visible');
+      if (first) first.src = buildUrl(dashStack.dataset.url || '');
+
+      // YouTube 153 fix
       loadYouTubeIframe();
-      // tải API và khởi tạo player (không chặn slideshow)
       ensureYTApi().then(initYTPlayer);
-      // bắt đầu vòng trình chiếu
+
+      // Bắt đầu slideshow
       idx = 0; run();
     });
 
+    // Tạm dừng video khi tab ẩn
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && player && player.pauseVideo) player.pauseVideo();
     });
