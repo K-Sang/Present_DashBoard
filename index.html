@@ -4,47 +4,81 @@
   <meta charset="UTF-8" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Slideshow: Looker + Ảnh + Video (double-buffer + YT 153 fix)</title>
+  <title>Slideshow: 2×Looker + WebLink — Auto + Top-Right Controls</title>
   <style>
-    :root { --bg: #ffffff; }
-    html, body { margin:0; padding:0; width:100vw; height:100vh; overflow:hidden; background:var(--bg); font-family:system-ui,sans-serif; }
-    .container { position:absolute; inset:0; display:none; width:100vw; height:100vh; background:var(--bg); }
-    .container.active { display:block; }
+    :root { --bg:#ffffff; }
+    html,body{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:var(--bg);font-family:system-ui,sans-serif;}
+    .container{position:absolute;inset:0;display:none;width:100vw;height:100vh;background:var(--bg);}
+    .container.active{display:block;}
 
-    .dash-wrap { position:relative; width:100%; height:100%; background:var(--bg); }
+    /* Looker double-buffer */
+    .dash-wrap{position:relative;width:100%;height:100%;}
+    .stack{position:relative;width:100%;height:100%;}
+    .stack>iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg);opacity:0;pointer-events:none;transition:opacity 300ms ease;}
+    .stack>iframe.visible{opacity:1;pointer-events:auto;}
 
-    .stack { position:relative; width:100%; height:100%; background:var(--bg); }
-    .stack > iframe {
-      position:absolute; inset:0;
-      width:100%; height:100%; border:0; display:block; background:var(--bg);
-      opacity:0; pointer-events:none; transition: opacity 300ms ease;
+    /* Image / Video */
+    img{width:100%;height:100%;object-fit:contain;display:block;background:var(--bg);}
+    #youtube-iframe{width:100%;height:100%;border:0;display:block;}
+
+    /* WebLink zoom (ẩn UI) */
+    #weblink{background:#fff;}
+    .weblink-outer{position:absolute;inset:0;overflow:auto;background:#fff;}
+    .weblink-inner{
+      width:calc(100% / var(--zoom,1));
+      height:calc(100% / var(--zoom,1));
+      transform:scale(var(--zoom,1));
+      transform-origin:top left;
     }
-    .stack > iframe.visible { opacity:1; pointer-events:auto; }
+    .weblink-inner>iframe{width:100%;height:100%;border:0;background:#fff;}
 
-    img { width:100%; height:100%; object-fit:contain; display:block; background:var(--bg); }
-    iframe.fill { width:100%; height:100%; border:0; display:block; background:var(--bg); }
-    #youtube-iframe { width:100%; height:100%; border:0; display:block; }
+    /* ===== Control panel (top-right + scalable) ===== */
+    .ctrl {
+      position:fixed; right:10px; top:10px;
+      display:flex; align-items:center; gap:8px;
+      background:rgba(0,0,0,.55); color:#fff; padding:6px 10px;
+      border-radius:12px; backdrop-filter:blur(4px); z-index:9999;
+      opacity:0; pointer-events:none; transition:opacity .25s ease, transform .1s ease;
+      transform-origin: top right;
+    }
+    .ctrl.show{opacity:1; pointer-events:auto;}
+    .ctrl.scaled{ transform: scale(var(--ctrl-scale,1)); }
+    .ctrl button, .ctrl select{
+      border:0; border-radius:8px; padding:6px 10px; font-weight:600;
+    }
+    .ctrl button{cursor:pointer;}
+    .ctrl select{background:#fff; color:#000;}
   </style>
 </head>
 <body>
 
-  <!-- LOOKER (double-buffer) -->
-  <div class="container active" id="dashboard">
+  <!-- LOOKER #1 -->
+  <div class="container active" id="looker1">
     <div class="dash-wrap">
-      <div class="stack" id="dashStack"
+      <div class="stack" id="stack1"
            data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC?rm=minimal&chromeless=1">
         <iframe class="visible" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
       </div>
     </div>
   </div>
 
-  <!-- WEB LINK (sau Looker 1, 3 phút) -->
+  <!-- LOOKER #2 (đổi URL thành báo cáo 2 của bạn) -->
+  <div class="container" id="looker2">
+    <div class="dash-wrap">
+      <div class="stack" id="stack2"
+           data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/p_97z66qpexd?rm=minimal&chromeless=1">
+        <iframe class="visible" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- WEB LINK (giữ trạng thái, chỉ zoom) -->
   <div class="container" id="weblink">
-    <iframe id="weblink-iframe"
-            class="fill"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allow="fullscreen; clipboard-write">
-    </iframe>
+    <div class="weblink-outer" id="weblinkOuter" style="--zoom:0.90">
+      <div class="weblink-inner">
+        <iframe id="weblink-iframe" referrerpolicy="strict-origin-when-cross-origin" allow="fullscreen; clipboard-write"></iframe>
+      </div>
+    </div>
   </div>
 
   <!-- IMAGE (tuỳ chọn) -->
@@ -54,187 +88,123 @@
 
   <!-- VIDEO (YouTube) -->
   <div class="container" id="video">
-    <iframe
-      id="youtube-iframe"
-      referrerpolicy="strict-origin-when-cross-origin"
-      allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write"
-      title="YouTube video"
-    ></iframe>
+    <iframe id="youtube-iframe" referrerpolicy="strict-origin-when-cross-origin"
+      allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write" title="YouTube video"></iframe>
   </div>
 
-  <script>
-    /* ===== CẤU HÌNH ===== */
-    const SHOW_IMAGE = false;
-    const DASHBOARD_DURATION = 120000;     // 2 phút
-    const WEBLINK_DURATION   = 180000;     // 3 phút (theo yêu cầu)
-    const IMAGE_DURATION     = 240000;     // 4 phút
-    const VIDEO_LIMIT_MS     = 250000;     // 4m10s fallback
-    const RELOAD_DASH_ON_SHOW = true;
-    const DASH_REFRESH_MS     = 0;         // 0 = tắt
-    const FADE_MS             = 300;
+<!-- Control Panel (Top-right, scalable, no jump) -->
+<div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
+  <button id="btnPrev">◀ Prev</button>
+  <button id="btnPlayPause">⏸ Pause</button>
+  <button id="btnNext">Next ▶</button>
+</div>
 
-    // Web link bạn yêu cầu
-    const WEBLINK_URL = 'https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall';
+<script>
+  /* ===== CONFIG ===== */
+  const SHOW_IMAGE           = false;
+  const LOOKER_DURATION_MS   = 60000;      // 1 phút mỗi Looker
+  const WEBLINK_DURATION_MS  = 180000;     // 3 phút
+  const IMAGE_DURATION_MS    = 240000;
+  const VIDEO_LIMIT_MS       = 250000;
+  const RELOAD_ON_SHOW       = true;
+  const FADE_MS              = 300;
+  const DASH_REFRESH_MS      = 0;
 
-    // YouTube
-    const YT_VIDEO_ID     = 'Rtacb6pn7vk';
-    const YT_PRIVACY_MODE = false;
+  // WebLink
+  const WEBLINK_URL = 'https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall';
+  const WEBLINK_DEFAULT_ZOOM = 0.9;
+  const PERSIST_WEBLINK_STATE = true;
 
-    /* ===== BIẾN ===== */
-    const elDash   = document.getElementById('dashboard');
-    const elWeb    = document.getElementById('weblink');
-    const elImg    = document.getElementById('image');
-    const elVid    = document.getElementById('video');
-    const dashStack= document.getElementById('dashStack');
-    const webIframe= document.getElementById('weblink-iframe');
-    const ytIframe = document.getElementById('youtube-iframe');
+  // Panel
+  const AUTOPLAY_DEFAULT = true;
+  const CTRL_AUTOHIDE_MS = 2500;
+  const CTRL_SCALE = 1.25;   // ⇦ chỉnh độ to nhỏ panel
 
-    let stageTimer = null, videoTimer = null, dashPeriodicTimer = null;
-    let player = null, retriedOnce = false;
-    // Flow: Looker → WebLink (3') → (Image nếu bật) → Video
-    const flow = ['dashboard', 'weblink', ...(SHOW_IMAGE ? ['image'] : []), 'video'];
-    let idx = 0, hasShownDashOnce = false;
+  // YouTube
+  const YT_VIDEO_ID = 'Rtacb6pn7vk';
+  const YT_PRIVACY_MODE = false;
 
-    /* ===== TIỆN ÍCH HIỂN THỊ ===== */
-    function setActive(name) {
-      [elDash, elWeb, elImg, elVid].forEach(el => el.classList.remove('active'));
-      ({dashboard: elDash, weblink: elWeb, image: elImg, video: elVid}[name]).classList.add('active');
-    }
-    function clearTimers() {
-      if (stageTimer)       { clearTimeout(stageTimer); stageTimer = null; }
-      if (videoTimer)       { clearTimeout(videoTimer); videoTimer = null; }
-      if (dashPeriodicTimer){ clearInterval(dashPeriodicTimer); dashPeriodicTimer = null; }
-    }
-    function buildUrl(base) {
-      const sep = base.includes('?') ? '&' : '?';
-      return `${base}${sep}_ts=${Date.now()}`; // cache-buster
-    }
+  /* ===== refs ===== */
+  const elL1=document.getElementById('looker1'),
+        elL2=document.getElementById('looker2'),
+        elWeb=document.getElementById('weblink'),
+        elImg=document.getElementById('image'),
+        elVid=document.getElementById('video');
+  const stack1=document.getElementById('stack1'),
+        stack2=document.getElementById('stack2'),
+        webIframe=document.getElementById('weblink-iframe'),
+        webOuter=document.getElementById('weblinkOuter');
+  const ctrl=document.getElementById('ctrl'),
+        btnPrev=document.getElementById('btnPrev'),
+        btnNext=document.getElementById('btnNext'),
+        btnPlayPause=document.getElementById('btnPlayPause');
 
-    // ===== DOUBLE-BUFFER cho Looker =====
-    function softRefreshDash() {
-      const base = dashStack.dataset.url || '';
-      if (!base) return;
+  let stageTimer=null, videoTimer=null, periodicTimer=null;
+  let player=null, retriedOnce=false;
+  const flow=['looker1','looker2','weblink',...(SHOW_IMAGE?['image']:[]),'video'];
+  let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
+  let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
 
-      const oldIframe = dashStack.querySelector('iframe.visible');
-      const newIframe = document.createElement('iframe');
-      newIframe.setAttribute('allowfullscreen', '');
-      newIframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-      newIframe.src = buildUrl(base);
-      dashStack.appendChild(newIframe);
+  /* ===== helpers ===== */
+  function setActive(name){
+    [elL1,elL2,elWeb,elImg,elVid].forEach(el=>el.classList.remove('active'));
+    ({looker1:elL1,looker2:elL2,weblink:elWeb,image:elImg,video:elVid}[name]).classList.add('active');
+  }
+  function clearTimers(){[stageTimer,videoTimer,periodicTimer].forEach(t=>t&&clearTimeout(t)); stageTimer=videoTimer=periodicTimer=null;}
+  function addTs(u){const s=u.includes('?')?'&':'?';return `${u}${s}_ts=${Date.now()}`;}
+  function softRefresh(stack){
+    const base=stack.dataset.url||'';if(!base)return;
+    const old=stack.querySelector('iframe.visible'), n=document.createElement('iframe');
+    n.allowFullscreen=true; n.referrerPolicy='strict-origin-when-cross-origin'; n.src=addTs(base);
+    stack.appendChild(n);
+    n.addEventListener('load',()=>{requestAnimationFrame(()=>{n.classList.add('visible');old&&(old.classList.remove('visible'),setTimeout(()=>old.remove(),FADE_MS+50));});},{once:true});
+  }
+  function applyWeblinkZoom(z){webOuter.style.setProperty('--zoom',Math.max(0.5,Math.min(2,parseFloat(z)||1)));}
 
-      newIframe.addEventListener('load', () => {
-        requestAnimationFrame(() => {
-          newIframe.classList.add('visible');
-          if (oldIframe) {
-            oldIframe.classList.remove('visible');
-            setTimeout(() => oldIframe.remove(), FADE_MS + 50);
-          }
-        });
-      }, { once: true });
-    }
+  // YouTube setup (giữ nguyên)
+  function ytUrl(){const h=YT_PRIVACY_MODE?'https://www.youtube-nocookie.com':'https://www.youtube.com';
+    return `${h}/embed/${YT_VIDEO_ID}?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}`;}
+  function ensureYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);window.onYouTubeIframeAPIReady=()=>r();});}
+  function initYT(){player=new YT.Player('youtube-iframe',{events:{
+    onStateChange:e=>{if(e.data===YT.PlayerState.ENDED){clearTimers();if(autoplay)next();}},
+    onError:()=>{if(!retriedOnce){retriedOnce=true;document.getElementById('youtube-iframe').src=ytUrl()+`&ts=${Date.now()}`;}}
+  }});}
 
-    /* ===== YOUTUBE ===== */
-    function buildYTUrl() {
-      const host = YT_PRIVACY_MODE ? 'https://www.youtube-nocookie.com' : 'https://www.youtube.com';
-      return (
-        `${host}/embed/${YT_VIDEO_ID}`
-        + `?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1`
-        + `&origin=${encodeURIComponent(window.location.origin)}`
-      );
-    }
-    function loadYouTubeIframe() { ytIframe.src = buildYTUrl(); }
-    function ensureYTApi() {
-      return new Promise((resolve) => {
-        if (window.YT && window.YT.Player) return resolve();
-        const s = document.createElement('script');
-        s.src = 'https://www.youtube.com/iframe_api';
-        document.head.appendChild(s);
-        window.onYouTubeIframeAPIReady = () => resolve();
-      });
-    }
-    function initYTPlayer() {
-      player = new YT.Player('youtube-iframe', {
-        events: {
-          onStateChange: (e) => {
-            if (e.data === YT.PlayerState.ENDED) { clearTimers(); next(); }
-          },
-          onError: () => {
-            if (!retriedOnce) {
-              retriedOnce = true;
-              ytIframe.src = buildYTUrl() + `&ts=${Date.now()}`;
-            }
-          }
-        }
-      });
-    }
+  /* ===== screens ===== */
+  function doTimer(ms){if(!autoplay)return;stageTimer=setTimeout(next,ms);}
+  function showLooker1(){clearTimers();setActive('looker1');player?.stopVideo?.();if(RELOAD_ON_SHOW&&shownL1)softRefresh(stack1);shownL1=true;doTimer(LOOKER_DURATION_MS);}
+  function showLooker2(){clearTimers();setActive('looker2');player?.stopVideo?.();if(RELOAD_ON_SHOW&&shownL2)softRefresh(stack2);shownL2=true;doTimer(LOOKER_DURATION_MS);}
+  function showWebLink(){clearTimers();setActive('weblink');player?.stopVideo?.();applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
+    if(!weblinkLoaded||!PERSIST_WEBLINK_STATE){webIframe.src=addTs(WEBLINK_URL);weblinkLoaded=true;}
+    doTimer(WEBLINK_DURATION_MS);}
+  function showImage(){clearTimers();setActive('image');player?.stopVideo?.();doTimer(IMAGE_DURATION_MS);}
+  function showVideo(){clearTimers();setActive('video');retriedOnce=false;const y=document.getElementById('youtube-iframe');if(!y.src)y.src=ytUrl();
+    player?.playVideo?.();if(autoplay)videoTimer=setTimeout(()=>{player?.stopVideo?.();next();},VIDEO_LIMIT_MS);}
+  function go(i){idx=(i%flow.length+flow.length)%flow.length;({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[flow[idx]]();}
+  function next(){go(idx+1);} function prev(){go(idx-1);}
 
-    /* ===== MÀN HÌNH ===== */
-    function showDashboard() {
-      clearTimers();
-      setActive('dashboard');
-      if (player && player.stopVideo) player.stopVideo();
+  /* ===== Controls ===== */
+  ctrl.style.setProperty('--ctrl-scale',CTRL_SCALE);
+  function updatePlayLabel(){btnPlayPause.textContent=autoplay?'⏸ Pause':'▶ Play';}
+  btnPrev.onclick=()=>prev(); btnNext.onclick=()=>next();
+  btnPlayPause.onclick=()=>{autoplay=!autoplay;updatePlayLabel();go(idx);}
+  function showCtrl(){ctrl.classList.add('show');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);}
+  window.addEventListener('mousemove',showCtrl,{passive:true});
+  window.addEventListener('touchstart',showCtrl,{passive:true});
+  window.addEventListener('keydown',e=>{
+    if(['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName))return;
+    if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();next();}
+    if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();prev();}
+    if(e.key.toLowerCase()==='p'){e.preventDefault();btnPlayPause.click();}
+  });
 
-      if (RELOAD_DASH_ON_SHOW && hasShownDashOnce) softRefreshDash();
-      hasShownDashOnce = true;
-
-      if (DASH_REFRESH_MS > 0) {
-        dashPeriodicTimer = setInterval(softRefreshDash, DASH_REFRESH_MS);
-      }
-
-      stageTimer = setTimeout(next, DASHBOARD_DURATION);
-    }
-
-    function showWebLink() {
-      clearTimers();
-      setActive('weblink');
-      if (player && player.stopVideo) player.stopVideo();
-      // Gán src khi vào màn để tránh tải nền
-      try { webIframe.src = buildUrl(WEBLINK_URL); } catch(e) {}
-      stageTimer = setTimeout(next, WEBLINK_DURATION);
-    }
-
-    function showImage() {
-      clearTimers();
-      setActive('image');
-      if (player && player.stopVideo) player.stopVideo();
-      stageTimer = setTimeout(next, IMAGE_DURATION);
-    }
-
-    function showVideo() {
-      clearTimers();
-      setActive('video');
-      retriedOnce = false;
-      if (player && player.playVideo) {
-        try { player.seekTo(0, true); } catch(e) {}
-        player.playVideo();
-      }
-      videoTimer = setTimeout(() => { if (player && player.stopVideo) player.stopVideo(); next(); }, VIDEO_LIMIT_MS);
-    }
-
-    function next() { idx = (idx + 1) % flow.length; run(); }
-    function run() {
-      const name = flow[idx];
-      if (name === 'dashboard') return showDashboard();
-      if (name === 'weblink')   return showWebLink();
-      if (name === 'image')     return showImage();
-      if (name === 'video')     return showVideo();
-    }
-
-    /* ===== BOOT ===== */
-    document.addEventListener('DOMContentLoaded', async () => {
-      const first = dashStack.querySelector('iframe.visible');
-      if (first) first.src = buildUrl(dashStack.dataset.url || '');
-
-      loadYouTubeIframe();
-      ensureYTApi().then(initYTPlayer);
-
-      idx = 0; run();
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && player && player.pauseVideo) player.pauseVideo();
-    });
-  </script>
-</body>
-</html>
-
+  /* ===== boot ===== */
+  document.addEventListener('DOMContentLoaded',()=>{
+    const f1=stack1.querySelector('iframe.visible');if(f1)f1.src=addTs(stack1.dataset.url||'');
+    const f2=stack2.querySelector('iframe.visible');if(f2)f2.src=addTs(stack2.dataset.url||'');
+    ensureYT().then(initYT);
+    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
+    updatePlayLabel(); go(0);
+    ctrl.classList.add('show');setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
+  });
+</script>
