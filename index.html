@@ -92,12 +92,12 @@
       allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write" title="YouTube video"></iframe>
   </div>
 
-<!-- Control Panel (Top-right, scalable, no jump) -->
-<div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
-  <button id="btnPrev">◀ Prev</button>
-  <button id="btnPlayPause">⏸ Pause</button>
-  <button id="btnNext">Next ▶</button>
-</div>
+  <!-- Control Panel (Top-right, scalable, no jump) -->
+  <div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
+    <button id="btnPrev">◀ Prev</button>
+    <button id="btnPlayPause">⏸ Pause</button>
+    <button id="btnNext">Next ▶</button>
+  </div>
 
 <script>
   /* ===== CONFIG ===== */
@@ -140,7 +140,8 @@
         btnPlayPause=document.getElementById('btnPlayPause');
 
   let stageTimer=null, videoTimer=null, periodicTimer=null;
-  let player=null, retriedOnce=false;
+  let player=null, retriedOnce=false, ytReady=false; // ★ NEW: ytReady
+
   const flow=['looker1','looker2','weblink',...(SHOW_IMAGE?['image']:[]),'video'];
   let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
   let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
@@ -161,14 +162,59 @@
   }
   function applyWeblinkZoom(z){webOuter.style.setProperty('--zoom',Math.max(0.5,Math.min(2,parseFloat(z)||1)));}
 
-  // YouTube setup (giữ nguyên)
-  function ytUrl(){const h=YT_PRIVACY_MODE?'https://www.youtube-nocookie.com':'https://www.youtube.com';
-    return `${h}/embed/${YT_VIDEO_ID}?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}`;}
-  function ensureYT(){return new Promise(r=>{if(window.YT&&YT.Player)return r();const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);window.onYouTubeIframeAPIReady=()=>r();});}
-  function initYT(){player=new YT.Player('youtube-iframe',{events:{
-    onStateChange:e=>{if(e.data===YT.PlayerState.ENDED){clearTimers();if(autoplay)next();}},
-    onError:()=>{if(!retriedOnce){retriedOnce=true;document.getElementById('youtube-iframe').src=ytUrl()+`&ts=${Date.now()}`;}}
-  }});}
+  // YouTube setup
+  function ytUrl(){
+    const h=YT_PRIVACY_MODE?'https://www.youtube-nocookie.com':'https://www.youtube.com';
+    return `${h}/embed/${YT_VIDEO_ID}?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
+  }
+  function ensureYT(){
+    return new Promise(r=>{
+      if(window.YT&&YT.Player) return r();
+      const s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+      window.onYouTubeIframeAPIReady=()=>r();
+    });
+  }
+  function initYT(){
+    player=new YT.Player('youtube-iframe',{
+      events:{
+        onReady: () => { ytReady = true; }, // ★ NEW
+        onStateChange:e=>{
+          if(e.data===YT.PlayerState.ENDED){
+            clearTimers();
+            if(autoplay) next();
+          }
+        },
+        onError:()=>{
+          if(!retriedOnce){
+            retriedOnce=true;
+            document.getElementById('youtube-iframe').src=ytUrl()+`&ts=${Date.now()}`;
+          }
+        }
+      }
+    });
+  }
+
+  // ★ NEW: luôn phát từ đầu khi vào màn video
+  function playFromStart(){
+    try{
+      player?.mute?.();                 // đảm bảo autoplay không bị chặn
+      player?.seekTo?.(0,true);         // về 0s (nhẹ)
+      player?.playVideo?.();
+
+      // Nếu vẫn chưa PLAY → nạp cứng từ 0s
+      setTimeout(()=>{
+        const s = player?.getPlayerState?.();
+        if(s !== YT.PlayerState.PLAYING){
+          player?.loadVideoById?.({ videoId: YT_VIDEO_ID, startSeconds: 0 });
+          player?.playVideo?.();
+        }
+      },100);
+    }catch(e){
+      // Phương án cuối: reset iframe
+      const y=document.getElementById('youtube-iframe');
+      y.src = ytUrl() + `&ts=${Date.now()}`;
+    }
+  }
 
   /* ===== screens ===== */
   function doTimer(ms){if(!autoplay)return;stageTimer=setTimeout(next,ms);}
@@ -178,8 +224,28 @@
     if(!weblinkLoaded||!PERSIST_WEBLINK_STATE){webIframe.src=addTs(WEBLINK_URL);weblinkLoaded=true;}
     doTimer(WEBLINK_DURATION_MS);}
   function showImage(){clearTimers();setActive('image');player?.stopVideo?.();doTimer(IMAGE_DURATION_MS);}
-  function showVideo(){clearTimers();setActive('video');retriedOnce=false;const y=document.getElementById('youtube-iframe');if(!y.src)y.src=ytUrl();
-    player?.playVideo?.();if(autoplay)videoTimer=setTimeout(()=>{player?.stopVideo?.();next();},VIDEO_LIMIT_MS);}
+
+  // ★ CHANGED: showVideo luôn phát lại từ giây 0
+  function showVideo(){
+    clearTimers();
+    setActive('video');
+    retriedOnce=false;
+
+    const y=document.getElementById('youtube-iframe');
+    if(!y.src) y.src=ytUrl(); // nạp lần đầu
+
+    if(ytReady && player){
+      playFromStart();
+    }else{
+      // chờ API sẵn sàng rồi phát
+      setTimeout(()=>{ if(ytReady && player) playFromStart(); }, 300);
+    }
+
+    if(autoplay){
+      videoTimer=setTimeout(()=>{ player?.stopVideo?.(); next(); }, VIDEO_LIMIT_MS);
+    }
+  }
+
   function go(i){idx=(i%flow.length+flow.length)%flow.length;({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[flow[idx]]();}
   function next(){go(idx+1);} function prev(){go(idx-1);}
 
@@ -208,4 +274,5 @@
     ctrl.classList.add('show');setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
   });
 </script>
-
+</body>
+</html>
