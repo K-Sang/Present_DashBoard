@@ -19,7 +19,7 @@
 
     /* Image / Video */
     img{width:100%;height:100%;object-fit:contain;display:block;background:var(--bg);}
-    #youtube-iframe{width:100%;height:100%;border:0;display:block;}
+    #youtube-iframe{width:100%;height:100%;}
 
     /* WebLink zoom (ẩn UI) */
     #weblink{background:#fff;}
@@ -62,7 +62,7 @@
     </div>
   </div>
 
-  <!-- LOOKER #2 (đổi URL thành báo cáo 2 của bạn) -->
+  <!-- LOOKER #2 -->
   <div class="container" id="looker2">
     <div class="dash-wrap">
       <div class="stack" id="stack2"
@@ -88,11 +88,11 @@
 
   <!-- VIDEO (YouTube) -->
   <div class="container" id="video">
-    <iframe id="youtube-iframe" referrerpolicy="strict-origin-when-cross-origin"
-      allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write" title="YouTube video"></iframe>
+    <!-- API sẽ chèn/loại bỏ iframe vào div mount này -->
+    <div id="youtube-iframe"></div>
   </div>
 
-  <!-- Control Panel (Top-right, scalable, no jump) -->
+  <!-- Control Panel -->
   <div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
     <button id="btnPrev">◀ Prev</button>
     <button id="btnPlayPause">⏸ Pause</button>
@@ -102,13 +102,12 @@
 <script>
   /* ===== CONFIG ===== */
   const SHOW_IMAGE           = false;
-  const LOOKER_DURATION_MS   = 60000;      // 1 phút mỗi Looker
-  const WEBLINK_DURATION_MS  = 180000;     // 3 phút
+  const LOOKER_DURATION_MS   = 60000;
+  const WEBLINK_DURATION_MS  = 180000;
   const IMAGE_DURATION_MS    = 240000;
   const VIDEO_LIMIT_MS       = 250000;
   const RELOAD_ON_SHOW       = true;
   const FADE_MS              = 300;
-  const DASH_REFRESH_MS      = 0;
 
   // WebLink
   const WEBLINK_URL = 'https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall';
@@ -118,11 +117,11 @@
   // Panel
   const AUTOPLAY_DEFAULT = true;
   const CTRL_AUTOHIDE_MS = 2500;
-  const CTRL_SCALE = 1.25;   // ⇦ chỉnh độ to nhỏ panel
+  const CTRL_SCALE = 1.25;
 
   // YouTube
   const YT_VIDEO_ID = 'Rtacb6pn7vk';
-  const YT_PRIVACY_MODE = false;
+  const YT_PRIVACY_MODE = false; // không-cookie mode nếu cần
 
   /* ===== refs ===== */
   const elL1=document.getElementById('looker1'),
@@ -139,8 +138,8 @@
         btnNext=document.getElementById('btnNext'),
         btnPlayPause=document.getElementById('btnPlayPause');
 
-  let stageTimer=null, videoTimer=null, periodicTimer=null;
-  let player=null, retriedOnce=false, ytReady=false; // ★ NEW: ytReady
+  let stageTimer=null, videoTimer=null;
+  let player=null, ytReady=false;
 
   const flow=['looker1','looker2','weblink',...(SHOW_IMAGE?['image']:[]),'video'];
   let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
@@ -151,7 +150,7 @@
     [elL1,elL2,elWeb,elImg,elVid].forEach(el=>el.classList.remove('active'));
     ({looker1:elL1,looker2:elL2,weblink:elWeb,image:elImg,video:elVid}[name]).classList.add('active');
   }
-  function clearTimers(){[stageTimer,videoTimer,periodicTimer].forEach(t=>t&&clearTimeout(t)); stageTimer=videoTimer=periodicTimer=null;}
+  function clearTimers(){[stageTimer,videoTimer].forEach(t=>t&&clearTimeout(t)); stageTimer=videoTimer=null;}
   function addTs(u){const s=u.includes('?')?'&':'?';return `${u}${s}_ts=${Date.now()}`;}
   function softRefresh(stack){
     const base=stack.dataset.url||'';if(!base)return;
@@ -162,116 +161,141 @@
   }
   function applyWeblinkZoom(z){webOuter.style.setProperty('--zoom',Math.max(0.5,Math.min(2,parseFloat(z)||1)));}
 
-  // YouTube setup
-  function ytUrl(){
-    const h=YT_PRIVACY_MODE?'https://www.youtube-nocookie.com':'https://www.youtube.com';
-    return `${h}/embed/${YT_VIDEO_ID}?enablejsapi=1&autoplay=1&mute=1&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
-  }
+  /* ===== YouTube API ===== */
   function ensureYT(){
     return new Promise(r=>{
-      if(window.YT&&YT.Player) return r();
-      const s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+      if(window.YT && YT.Player) return r();
+      const s=document.createElement('script');
+      s.src='https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
       window.onYouTubeIframeAPIReady=()=>r();
     });
   }
-  function initYT(){
-    player=new YT.Player('youtube-iframe',{
+
+  function createPlayerWithBust(){
+    // Xoá player cũ (nếu có)
+    try{ player && player.destroy && player.destroy(); }catch(e){}
+    ytReady=false;
+
+    // Đảm bảo mount là một DIV rỗng (API sẽ thay bằng iframe mới)
+    let mount=document.getElementById('youtube-iframe');
+    if(!mount || mount.tagName!=='DIV'){
+      // nếu đang là iframe hoặc bị mất mount → tạo lại
+      if(mount) mount.remove();
+      mount=document.createElement('div');
+      mount.id='youtube-iframe';
+      elVid.appendChild(mount);
+    }else{
+      mount.innerHTML='';
+    }
+
+    // Tạo player mới (thêm tham số “bust” để đảm bảo reload cứng)
+    const origin = encodeURIComponent(location.origin);
+    const bust = Date.now(); // cache-busting
+    player = new YT.Player('youtube-iframe',{
+      videoId: YT_VIDEO_ID,
+      playerVars: {
+        autoplay: 1,
+        mute: 1,
+        rel: 0,
+        playsinline: 1,
+        controls: 0,
+        modestbranding: 1,
+        origin: location.origin,
+        // tham số tùy ý để chắc chắn URL thay đổi
+        cc_lang_pref: bust   // dùng như một “timestamp” vô hại
+      },
       events:{
-        onReady: () => { ytReady = true; }, // ★ NEW
-        onStateChange:e=>{
+        onReady: ()=>{ ytReady=true; try{ player.playVideo && player.playVideo(); }catch(e){}; },
+        onStateChange: e=>{
           if(e.data===YT.PlayerState.ENDED){
             clearTimers();
             if(autoplay) next();
           }
         },
-        onError:()=>{
-          if(!retriedOnce){
-            retriedOnce=true;
-            document.getElementById('youtube-iframe').src=ytUrl()+`&ts=${Date.now()}`;
-          }
+        onError: ()=>{ // nếu lỗi, thử tạo lại 1 lần nữa
+          setTimeout(()=>{
+            try{ player && player.destroy && player.destroy(); }catch(e){}
+            createPlayerWithBust();
+          }, 250);
         }
       }
     });
   }
 
-  // ★ NEW: luôn phát từ đầu khi vào màn video
-  function playFromStart(){
-    try{
-      player?.mute?.();                 // đảm bảo autoplay không bị chặn
-      player?.seekTo?.(0,true);         // về 0s (nhẹ)
-      player?.playVideo?.();
-
-      // Nếu vẫn chưa PLAY → nạp cứng từ 0s
-      setTimeout(()=>{
-        const s = player?.getPlayerState?.();
-        if(s !== YT.PlayerState.PLAYING){
-          player?.loadVideoById?.({ videoId: YT_VIDEO_ID, startSeconds: 0 });
-          player?.playVideo?.();
-        }
-      },100);
-    }catch(e){
-      // Phương án cuối: reset iframe
-      const y=document.getElementById('youtube-iframe');
-      y.src = ytUrl() + `&ts=${Date.now()}`;
-    }
+  async function reloadVideoHard(){
+    await ensureYT();
+    createPlayerWithBust(); // luôn tạo player mới → luôn reload
   }
 
   /* ===== screens ===== */
-  function doTimer(ms){if(!autoplay)return;stageTimer=setTimeout(next,ms);}
-  function showLooker1(){clearTimers();setActive('looker1');player?.stopVideo?.();if(RELOAD_ON_SHOW&&shownL1)softRefresh(stack1);shownL1=true;doTimer(LOOKER_DURATION_MS);}
-  function showLooker2(){clearTimers();setActive('looker2');player?.stopVideo?.();if(RELOAD_ON_SHOW&&shownL2)softRefresh(stack2);shownL2=true;doTimer(LOOKER_DURATION_MS);}
-  function showWebLink(){clearTimers();setActive('weblink');player?.stopVideo?.();applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-    if(!weblinkLoaded||!PERSIST_WEBLINK_STATE){webIframe.src=addTs(WEBLINK_URL);weblinkLoaded=true;}
-    doTimer(WEBLINK_DURATION_MS);}
-  function showImage(){clearTimers();setActive('image');player?.stopVideo?.();doTimer(IMAGE_DURATION_MS);}
+  function doTimer(ms){ if(!autoplay) return; stageTimer=setTimeout(next,ms); }
 
-  // ★ CHANGED: showVideo luôn phát lại từ giây 0
-  function showVideo(){
-    clearTimers();
-    setActive('video');
-    retriedOnce=false;
-
-    const y=document.getElementById('youtube-iframe');
-    if(!y.src) y.src=ytUrl(); // nạp lần đầu
-
-    if(ytReady && player){
-      playFromStart();
-    }else{
-      // chờ API sẵn sàng rồi phát
-      setTimeout(()=>{ if(ytReady && player) playFromStart(); }, 300);
+  function showLooker1(){
+    clearTimers(); setActive('looker1');
+    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
+    if(RELOAD_ON_SHOW && shownL1) softRefresh(stack1);
+    shownL1=true; doTimer(LOOKER_DURATION_MS);
+  }
+  function showLooker2(){
+    clearTimers(); setActive('looker2');
+    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
+    if(RELOAD_ON_SHOW && shownL2) softRefresh(stack2);
+    shownL2=true; doTimer(LOOKER_DURATION_MS);
+  }
+  function showWebLink(){
+    clearTimers(); setActive('weblink');
+    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
+    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
+    if(!weblinkLoaded || !PERSIST_WEBLINK_STATE){
+      webIframe.src = addTs(WEBLINK_URL);
+      weblinkLoaded=true;
     }
+    doTimer(WEBLINK_DURATION_MS);
+  }
+  function showImage(){
+    clearTimers(); setActive('image');
+    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
+    doTimer(IMAGE_DURATION_MS);
+  }
 
+  async function showVideo(){
+    clearTimers(); setActive('video');
+    await reloadVideoHard(); // ⇦ MỖI LẦN VÀO VIDEO ĐỀU RELOAD + AUTO-PLAY
     if(autoplay){
-      videoTimer=setTimeout(()=>{ player?.stopVideo?.(); next(); }, VIDEO_LIMIT_MS);
+      videoTimer=setTimeout(()=>{ try{ player && player.stopVideo && player.stopVideo(); }catch(e){}; next(); }, VIDEO_LIMIT_MS);
     }
   }
 
-  function go(i){idx=(i%flow.length+flow.length)%flow.length;({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[flow[idx]]();}
-  function next(){go(idx+1);} function prev(){go(idx-1);}
+  function go(i){ idx=(i%flow.length+flow.length)%flow.length;
+    ({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[flow[idx]]();
+  }
+  function next(){ go(idx+1); }
+  function prev(){ go(idx-1); }
 
   /* ===== Controls ===== */
   ctrl.style.setProperty('--ctrl-scale',CTRL_SCALE);
-  function updatePlayLabel(){btnPlayPause.textContent=autoplay?'⏸ Pause':'▶ Play';}
-  btnPrev.onclick=()=>prev(); btnNext.onclick=()=>next();
-  btnPlayPause.onclick=()=>{autoplay=!autoplay;updatePlayLabel();go(idx);}
-  function showCtrl(){ctrl.classList.add('show');clearTimeout(ctrlTimer);ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);}
+  function updatePlayLabel(){ btnPlayPause.textContent=autoplay?'⏸ Pause':'▶ Play'; }
+  btnPrev.onclick=()=>prev();
+  btnNext.onclick=()=>next();
+  btnPlayPause.onclick=()=>{ autoplay=!autoplay; updatePlayLabel(); go(idx); };
+  function showCtrl(){ ctrl.classList.add('show'); clearTimeout(ctrlTimer); ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS); }
   window.addEventListener('mousemove',showCtrl,{passive:true});
   window.addEventListener('touchstart',showCtrl,{passive:true});
   window.addEventListener('keydown',e=>{
     if(['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName))return;
-    if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();next();}
-    if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();prev();}
-    if(e.key.toLowerCase()==='p'){e.preventDefault();btnPlayPause.click();}
+    if(['ArrowRight','PageDown',' '].includes(e.key)){ e.preventDefault(); next(); }
+    if(['ArrowLeft','PageUp'].includes(e.key)){ e.preventDefault(); prev(); }
+    if(e.key.toLowerCase()==='p'){ e.preventDefault(); btnPlayPause.click(); }
   });
 
   /* ===== boot ===== */
   document.addEventListener('DOMContentLoaded',()=>{
-    const f1=stack1.querySelector('iframe.visible');if(f1)f1.src=addTs(stack1.dataset.url||'');
-    const f2=stack2.querySelector('iframe.visible');if(f2)f2.src=addTs(stack2.dataset.url||'');
-    ensureYT().then(initYT);
+    const f1=stack1.querySelector('iframe.visible'); if(f1) f1.src=addTs(stack1.dataset.url||'');
+    const f2=stack2.querySelector('iframe.visible'); if(f2) f2.src=addTs(stack2.dataset.url||'');
     applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
     updatePlayLabel(); go(0);
-    ctrl.classList.add('show');setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
+    ctrl.classList.add('show'); setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
   });
 </script>
 </body>
