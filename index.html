@@ -101,6 +101,8 @@
 
 <script>
   /* ===== CONFIG ===== */
+  const SHOW_LOOKER2 = false;
+  const SHOW_VIDEO   = false;
   const SHOW_IMAGE           = false;
   const LOOKER_DURATION_MS   = 60000;
   const WEBLINK_DURATION_MS  = 180000;
@@ -141,7 +143,14 @@
   let stageTimer=null, videoTimer=null;
   let player=null, ytReady=false;
 
-  const flow=['looker1','looker2','weblink',...(SHOW_IMAGE?['image']:[]),'video'];
+  const flow = [
+    'looker1',
+    ...(SHOW_LOOKER2 ? ['looker2'] : []),
+    'weblink',
+    ...(SHOW_IMAGE ? ['image'] : []),
+    ...(SHOW_VIDEO ? ['video'] : [])
+  ];
+
   let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
   let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
 
@@ -300,3 +309,4 @@
 </script>
 </body>
 </html>
+
