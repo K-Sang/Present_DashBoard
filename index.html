@@ -49,30 +49,49 @@
     .ctrl button{cursor:pointer;}
     .ctrl select{background:#fff; color:#000;}
 
-    /* ===== LIST BOX (checkbox list) ===== */
-    .listbox{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:6px 10px;
-      border-radius:10px;
-      background:rgba(255,255,255,.12);
-      white-space:nowrap;
-    }
-    .listbox label{
-      display:flex;
-      align-items:center;
-      gap:6px;
-      font-size:12px;
+    /* ===== Dropdown Screen Picker ===== */
+    .dropdown{ position:relative; }
+
+    .dropdown-btn{
+      border:0;
+      border-radius:8px;
+      padding:6px 12px;
       font-weight:600;
       cursor:pointer;
+      background:#fff;
+      color:#000;
+    }
+
+    .dropdown-menu{
+      position:absolute;
+      top:110%;
+      right:0;
+      min-width:180px;
+      background:rgba(0,0,0,.85);
+      border-radius:10px;
+      padding:8px 10px;
+      display:none;
+      flex-direction:column;
+      gap:6px;
+      z-index:10000;
+      box-shadow:0 6px 18px rgba(0,0,0,.35);
+    }
+
+    .dropdown-menu label{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      font-weight:600;
+      color:#fff;
+      cursor:pointer;
+      white-space:nowrap;
       user-select:none;
     }
-    .listbox input[type="checkbox"]{
-      width:14px;
-      height:14px;
-      cursor:pointer;
-    }
+
+    .dropdown-menu input{ cursor:pointer; }
+
+    .dropdown.open .dropdown-menu{ display:flex; }
   </style>
 </head>
 <body>
@@ -113,7 +132,6 @@
 
   <!-- VIDEO (YouTube) -->
   <div class="container" id="video">
-    <!-- API sẽ chèn/loại bỏ iframe vào div mount này -->
     <div id="youtube-iframe"></div>
   </div>
 
@@ -122,280 +140,10 @@
     <button id="btnPrev">◀ Prev</button>
     <button id="btnPlayPause">⏸ Pause</button>
 
-    <!-- LIST BOX: tick cái nào sẽ show cái đó -->
-    <div class="listbox" id="screenPicker" title="Chọn màn cần chạy">
-      <label><input type="checkbox" data-screen="looker1" checked> Looker 1</label>
-      <label><input type="checkbox" data-screen="looker2" checked> Looker 2</label>
-      <label><input type="checkbox" data-screen="weblink" checked> WebLink</label>
-      <label><input type="checkbox" data-screen="image"> Image</label>
-      <label><input type="checkbox" data-screen="video" checked> YouTube</label>
-    </div>
-
-    <button id="btnNext">Next ▶</button>
-  </div>
-
-<script>
-  /* ===== CONFIG ===== */
-  const SHOW_IMAGE           = false;   // nếu false thì tick Image sẽ bị bỏ qua (an toàn)
-  const LOOKER_DURATION_MS   = 60000;
-  const WEBLINK_DURATION_MS  = 180000;
-  const IMAGE_DURATION_MS    = 240000;
-  const VIDEO_LIMIT_MS       = 250000;
-  const RELOAD_ON_SHOW       = true;
-  const FADE_MS              = 300;
-
-  // WebLink
-  const WEBLINK_URL = 'https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall';
-  const WEBLINK_DEFAULT_ZOOM = 0.9;
-  const PERSIST_WEBLINK_STATE = true;
-
-  // Panel
-  const AUTOPLAY_DEFAULT = true;
-  const CTRL_AUTOHIDE_MS = 2500;
-  const CTRL_SCALE = 1.25;
-
-  // YouTube
-  const YT_VIDEO_ID = 'Rtacb6pn7vk';
-  const YT_PRIVACY_MODE = false; // không-cookie mode nếu cần
-
-  /* ===== refs ===== */
-  const elL1=document.getElementById('looker1'),
-        elL2=document.getElementById('looker2'),
-        elWeb=document.getElementById('weblink'),
-        elImg=document.getElementById('image'),
-        elVid=document.getElementById('video');
-  const stack1=document.getElementById('stack1'),
-        stack2=document.getElementById('stack2'),
-        webIframe=document.getElementById('weblink-iframe'),
-        webOuter=document.getElementById('weblinkOuter');
-  const ctrl=document.getElementById('ctrl'),
-        btnPrev=document.getElementById('btnPrev'),
-        btnNext=document.getElementById('btnNext'),
-        btnPlayPause=document.getElementById('btnPlayPause');
-  const screenPicker = document.getElementById('screenPicker');
-
-  let stageTimer=null, videoTimer=null;
-  let player=null, ytReady=false;
-
-  // FLOW sẽ build từ checkbox
-  let flow = [];
-  let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
-  let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
-
-  /* ===== helpers ===== */
-  function setActive(name){
-    [elL1,elL2,elWeb,elImg,elVid].forEach(el=>el.classList.remove('active'));
-    ({looker1:elL1,looker2:elL2,weblink:elWeb,image:elImg,video:elVid}[name]).classList.add('active');
-  }
-  function clearTimers(){[stageTimer,videoTimer].forEach(t=>t&&clearTimeout(t)); stageTimer=videoTimer=null;}
-  function addTs(u){const s=u.includes('?')?'&':'?';return `${u}${s}_ts=${Date.now()}`;}
-  function softRefresh(stack){
-    const base=stack.dataset.url||'';if(!base)return;
-    const old=stack.querySelector('iframe.visible'), n=document.createElement('iframe');
-    n.allowFullscreen=true; n.referrerPolicy='strict-origin-when-cross-origin'; n.src=addTs(base);
-    stack.appendChild(n);
-    n.addEventListener('load',()=>{requestAnimationFrame(()=>{n.classList.add('visible');old&&(old.classList.remove('visible'),setTimeout(()=>old.remove(),FADE_MS+50));});},{once:true});
-  }
-  function applyWeblinkZoom(z){webOuter.style.setProperty('--zoom',Math.max(0.5,Math.min(2,parseFloat(z)||1)));}
-
-  /* ===== Dynamic flow from checkbox list ===== */
-  function getCheckedScreens(){
-    const cbs = [...screenPicker.querySelectorAll('input[type="checkbox"][data-screen]')];
-    const picked = cbs.filter(x => x.checked).map(x => x.dataset.screen);
-
-    // Chặn flow rỗng: nếu bỏ hết thì auto bật looker1
-    if(picked.length === 0){
-      const l1 = cbs.find(x => x.dataset.screen === 'looker1');
-      if(l1){ l1.checked = true; picked.push('looker1'); }
-    }
-
-    // Nếu SHOW_IMAGE=false mà user tick Image thì bỏ qua (an toàn)
-    if(!SHOW_IMAGE){
-      return picked.filter(s => s !== 'image');
-    }
-    return picked;
-  }
-
-  function rebuildFlow(keepCurrent=true){
-    const currentName = flow[idx];
-    flow = getCheckedScreens();
-
-    if(keepCurrent && currentName && flow.includes(currentName)){
-      idx = flow.indexOf(currentName);
-    }else{
-      idx = 0;
-    }
-  }
-
-  function onPickerChange(){
-    const currentName = flow[idx];
-    rebuildFlow(false);
-
-    if(currentName && !flow.includes(currentName)){
-      // đang ở màn bị bỏ chọn -> chuyển ngay
-      go(idx);
-    }else{
-      // vẫn hợp lệ -> refresh màn hiện tại để áp timer đúng
-      go(idx);
-    }
-  }
-
-  /* ===== YouTube API ===== */
-  function ensureYT(){
-    return new Promise(r=>{
-      if(window.YT && YT.Player) return r();
-      const s=document.createElement('script');
-      s.src = YT_PRIVACY_MODE ? 'https://www.youtube-nocookie.com/iframe_api' : 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(s);
-      window.onYouTubeIframeAPIReady=()=>r();
-    });
-  }
-
-  function createPlayerWithBust(){
-    try{ player && player.destroy && player.destroy(); }catch(e){}
-    ytReady=false;
-
-    // Ensure mount is DIV
-    let mount=document.getElementById('youtube-iframe');
-    if(!mount || mount.tagName!=='DIV'){
-      if(mount) mount.remove();
-      mount=document.createElement('div');
-      mount.id='youtube-iframe';
-      elVid.appendChild(mount);
-    }else{
-      mount.innerHTML='';
-    }
-
-    const bust = Date.now();
-    player = new YT.Player('youtube-iframe',{
-      videoId: YT_VIDEO_ID,
-      playerVars: {
-        autoplay: 1,
-        mute: 1,
-        rel: 0,
-        playsinline: 1,
-        controls: 0,
-        modestbranding: 1,
-        origin: location.origin,
-        cc_lang_pref: bust
-      },
-      events:{
-        onReady: ()=>{ ytReady=true; try{ player.playVideo && player.playVideo(); }catch(e){}; },
-        onStateChange: e=>{
-          if(e.data===YT.PlayerState.ENDED){
-            clearTimers();
-            if(autoplay) next();
-          }
-        },
-        onError: ()=>{
-          setTimeout(()=>{
-            try{ player && player.destroy && player.destroy(); }catch(e){}
-            createPlayerWithBust();
-          }, 250);
-        }
-      }
-    });
-  }
-
-  async function reloadVideoHard(){
-    await ensureYT();
-    createPlayerWithBust();
-  }
-
-  /* ===== screens ===== */
-  function doTimer(ms){ if(!autoplay) return; stageTimer=setTimeout(next,ms); }
-
-  function showLooker1(){
-    clearTimers(); setActive('looker1');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    if(RELOAD_ON_SHOW && shownL1) softRefresh(stack1);
-    shownL1=true; doTimer(LOOKER_DURATION_MS);
-  }
-  function showLooker2(){
-    clearTimers(); setActive('looker2');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    if(RELOAD_ON_SHOW && shownL2) softRefresh(stack2);
-    shownL2=true; doTimer(LOOKER_DURATION_MS);
-  }
-  function showWebLink(){
-    clearTimers(); setActive('weblink');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-    if(!weblinkLoaded || !PERSIST_WEBLINK_STATE){
-      webIframe.src = addTs(WEBLINK_URL);
-      weblinkLoaded=true;
-    }
-    doTimer(WEBLINK_DURATION_MS);
-  }
-  function showImage(){
-    clearTimers(); setActive('image');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    doTimer(IMAGE_DURATION_MS);
-  }
-
-  async function showVideo(){
-    clearTimers(); setActive('video');
-    await reloadVideoHard();
-    if(autoplay){
-      videoTimer=setTimeout(()=>{ try{ player && player.stopVideo && player.stopVideo(); }catch(e){}; next(); }, VIDEO_LIMIT_MS);
-    }
-  }
-
-  function go(i){
-    if(!flow || flow.length===0) rebuildFlow(false);
-    idx=(i%flow.length+flow.length)%flow.length;
-    const name = flow[idx];
-    ({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[name]?.();
-  }
-  function next(){ go(idx+1); }
-  function prev(){ go(idx-1); }
-
-  /* ===== Controls ===== */
-  ctrl.style.setProperty('--ctrl-scale',CTRL_SCALE);
-
-  function updatePlayLabel(){ btnPlayPause.textContent=autoplay?'⏸ Pause':'▶ Play'; }
-
-  btnPrev.onclick=()=>prev();
-  btnNext.onclick=()=>next();
-  btnPlayPause.onclick=()=>{
-    autoplay=!autoplay;
-    updatePlayLabel();
-    go(idx); // refresh timer state
-  };
-
-  screenPicker.addEventListener('change', (e)=>{
-    if(e.target && e.target.matches('input[type="checkbox"][data-screen]')){
-      onPickerChange();
-    }
-  });
-
-  function showCtrl(){
-    ctrl.classList.add('show');
-    clearTimeout(ctrlTimer);
-    ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
-  }
-  window.addEventListener('mousemove',showCtrl,{passive:true});
-  window.addEventListener('touchstart',showCtrl,{passive:true});
-  window.addEventListener('keydown',e=>{
-    if(['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName))return;
-    if(['ArrowRight','PageDown',' '].includes(e.key)){ e.preventDefault(); next(); }
-    if(['ArrowLeft','PageUp'].includes(e.key)){ e.preventDefault(); prev(); }
-    if(e.key.toLowerCase()==='p'){ e.preventDefault(); btnPlayPause.click(); }
-  });
-
-  /* ===== boot ===== */
-  document.addEventListener('DOMContentLoaded',()=>{
-    const f1=stack1.querySelector('iframe.visible'); if(f1) f1.src=addTs(stack1.dataset.url||'');
-    const f2=stack2.querySelector('iframe.visible'); if(f2) f2.src=addTs(stack2.dataset.url||'');
-    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-
-    updatePlayLabel();
-    rebuildFlow(false);
-    go(0);
-
-    ctrl.classList.add('show');
-    setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
-  });
-</script>
-</body>
-</html>
+    <!-- Dropdown listbox -->
+    <div class="dropdown" id="screenDropdown">
+      <button class="dropdown-btn" id="btnScreens">Screens ▾</button>
+      <div class="dropdown-menu" id="screenPicker" title="Chọn màn cần chạy">
+        <label><input type="checkbox" data-screen="looker1" checked> Looker 1</label>
+        <label><input type="checkbox" data-screen="looker2" checked> Looker 2</label>
+        <
