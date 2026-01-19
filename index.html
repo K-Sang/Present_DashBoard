@@ -48,6 +48,31 @@
     }
     .ctrl button{cursor:pointer;}
     .ctrl select{background:#fff; color:#000;}
+
+    /* ===== LIST BOX (checkbox list) ===== */
+    .listbox{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:6px 10px;
+      border-radius:10px;
+      background:rgba(255,255,255,.12);
+      white-space:nowrap;
+    }
+    .listbox label{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:12px;
+      font-weight:600;
+      cursor:pointer;
+      user-select:none;
+    }
+    .listbox input[type="checkbox"]{
+      width:14px;
+      height:14px;
+      cursor:pointer;
+    }
   </style>
 </head>
 <body>
@@ -96,14 +121,22 @@
   <div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
     <button id="btnPrev">◀ Prev</button>
     <button id="btnPlayPause">⏸ Pause</button>
+
+    <!-- LIST BOX: tick cái nào sẽ show cái đó -->
+    <div class="listbox" id="screenPicker" title="Chọn màn cần chạy">
+      <label><input type="checkbox" data-screen="looker1" checked> Looker 1</label>
+      <label><input type="checkbox" data-screen="looker2" checked> Looker 2</label>
+      <label><input type="checkbox" data-screen="weblink" checked> WebLink</label>
+      <label><input type="checkbox" data-screen="image"> Image</label>
+      <label><input type="checkbox" data-screen="video" checked> YouTube</label>
+    </div>
+
     <button id="btnNext">Next ▶</button>
   </div>
 
 <script>
   /* ===== CONFIG ===== */
-  const SHOW_LOOKER2 = false;
-  const SHOW_VIDEO   = false;
-  const SHOW_IMAGE           = false;
+  const SHOW_IMAGE           = false;   // nếu false thì tick Image sẽ bị bỏ qua (an toàn)
   const LOOKER_DURATION_MS   = 60000;
   const WEBLINK_DURATION_MS  = 180000;
   const IMAGE_DURATION_MS    = 240000;
@@ -139,18 +172,13 @@
         btnPrev=document.getElementById('btnPrev'),
         btnNext=document.getElementById('btnNext'),
         btnPlayPause=document.getElementById('btnPlayPause');
+  const screenPicker = document.getElementById('screenPicker');
 
   let stageTimer=null, videoTimer=null;
   let player=null, ytReady=false;
 
-  const flow = [
-    'looker1',
-    ...(SHOW_LOOKER2 ? ['looker2'] : []),
-    'weblink',
-    ...(SHOW_IMAGE ? ['image'] : []),
-    ...(SHOW_VIDEO ? ['video'] : [])
-  ];
-
+  // FLOW sẽ build từ checkbox
+  let flow = [];
   let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
   let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
 
@@ -170,26 +198,66 @@
   }
   function applyWeblinkZoom(z){webOuter.style.setProperty('--zoom',Math.max(0.5,Math.min(2,parseFloat(z)||1)));}
 
+  /* ===== Dynamic flow from checkbox list ===== */
+  function getCheckedScreens(){
+    const cbs = [...screenPicker.querySelectorAll('input[type="checkbox"][data-screen]')];
+    const picked = cbs.filter(x => x.checked).map(x => x.dataset.screen);
+
+    // Chặn flow rỗng: nếu bỏ hết thì auto bật looker1
+    if(picked.length === 0){
+      const l1 = cbs.find(x => x.dataset.screen === 'looker1');
+      if(l1){ l1.checked = true; picked.push('looker1'); }
+    }
+
+    // Nếu SHOW_IMAGE=false mà user tick Image thì bỏ qua (an toàn)
+    if(!SHOW_IMAGE){
+      return picked.filter(s => s !== 'image');
+    }
+    return picked;
+  }
+
+  function rebuildFlow(keepCurrent=true){
+    const currentName = flow[idx];
+    flow = getCheckedScreens();
+
+    if(keepCurrent && currentName && flow.includes(currentName)){
+      idx = flow.indexOf(currentName);
+    }else{
+      idx = 0;
+    }
+  }
+
+  function onPickerChange(){
+    const currentName = flow[idx];
+    rebuildFlow(false);
+
+    if(currentName && !flow.includes(currentName)){
+      // đang ở màn bị bỏ chọn -> chuyển ngay
+      go(idx);
+    }else{
+      // vẫn hợp lệ -> refresh màn hiện tại để áp timer đúng
+      go(idx);
+    }
+  }
+
   /* ===== YouTube API ===== */
   function ensureYT(){
     return new Promise(r=>{
       if(window.YT && YT.Player) return r();
       const s=document.createElement('script');
-      s.src='https://www.youtube.com/iframe_api';
+      s.src = YT_PRIVACY_MODE ? 'https://www.youtube-nocookie.com/iframe_api' : 'https://www.youtube.com/iframe_api';
       document.head.appendChild(s);
       window.onYouTubeIframeAPIReady=()=>r();
     });
   }
 
   function createPlayerWithBust(){
-    // Xoá player cũ (nếu có)
     try{ player && player.destroy && player.destroy(); }catch(e){}
     ytReady=false;
 
-    // Đảm bảo mount là một DIV rỗng (API sẽ thay bằng iframe mới)
+    // Ensure mount is DIV
     let mount=document.getElementById('youtube-iframe');
     if(!mount || mount.tagName!=='DIV'){
-      // nếu đang là iframe hoặc bị mất mount → tạo lại
       if(mount) mount.remove();
       mount=document.createElement('div');
       mount.id='youtube-iframe';
@@ -198,9 +266,7 @@
       mount.innerHTML='';
     }
 
-    // Tạo player mới (thêm tham số “bust” để đảm bảo reload cứng)
-    const origin = encodeURIComponent(location.origin);
-    const bust = Date.now(); // cache-busting
+    const bust = Date.now();
     player = new YT.Player('youtube-iframe',{
       videoId: YT_VIDEO_ID,
       playerVars: {
@@ -211,8 +277,7 @@
         controls: 0,
         modestbranding: 1,
         origin: location.origin,
-        // tham số tùy ý để chắc chắn URL thay đổi
-        cc_lang_pref: bust   // dùng như một “timestamp” vô hại
+        cc_lang_pref: bust
       },
       events:{
         onReady: ()=>{ ytReady=true; try{ player.playVideo && player.playVideo(); }catch(e){}; },
@@ -222,7 +287,7 @@
             if(autoplay) next();
           }
         },
-        onError: ()=>{ // nếu lỗi, thử tạo lại 1 lần nữa
+        onError: ()=>{
           setTimeout(()=>{
             try{ player && player.destroy && player.destroy(); }catch(e){}
             createPlayerWithBust();
@@ -234,7 +299,7 @@
 
   async function reloadVideoHard(){
     await ensureYT();
-    createPlayerWithBust(); // luôn tạo player mới → luôn reload
+    createPlayerWithBust();
   }
 
   /* ===== screens ===== */
@@ -270,25 +335,45 @@
 
   async function showVideo(){
     clearTimers(); setActive('video');
-    await reloadVideoHard(); // ⇦ MỖI LẦN VÀO VIDEO ĐỀU RELOAD + AUTO-PLAY
+    await reloadVideoHard();
     if(autoplay){
       videoTimer=setTimeout(()=>{ try{ player && player.stopVideo && player.stopVideo(); }catch(e){}; next(); }, VIDEO_LIMIT_MS);
     }
   }
 
-  function go(i){ idx=(i%flow.length+flow.length)%flow.length;
-    ({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[flow[idx]]();
+  function go(i){
+    if(!flow || flow.length===0) rebuildFlow(false);
+    idx=(i%flow.length+flow.length)%flow.length;
+    const name = flow[idx];
+    ({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[name]?.();
   }
   function next(){ go(idx+1); }
   function prev(){ go(idx-1); }
 
   /* ===== Controls ===== */
   ctrl.style.setProperty('--ctrl-scale',CTRL_SCALE);
+
   function updatePlayLabel(){ btnPlayPause.textContent=autoplay?'⏸ Pause':'▶ Play'; }
+
   btnPrev.onclick=()=>prev();
   btnNext.onclick=()=>next();
-  btnPlayPause.onclick=()=>{ autoplay=!autoplay; updatePlayLabel(); go(idx); };
-  function showCtrl(){ ctrl.classList.add('show'); clearTimeout(ctrlTimer); ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS); }
+  btnPlayPause.onclick=()=>{
+    autoplay=!autoplay;
+    updatePlayLabel();
+    go(idx); // refresh timer state
+  };
+
+  screenPicker.addEventListener('change', (e)=>{
+    if(e.target && e.target.matches('input[type="checkbox"][data-screen]')){
+      onPickerChange();
+    }
+  });
+
+  function showCtrl(){
+    ctrl.classList.add('show');
+    clearTimeout(ctrlTimer);
+    ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
+  }
   window.addEventListener('mousemove',showCtrl,{passive:true});
   window.addEventListener('touchstart',showCtrl,{passive:true});
   window.addEventListener('keydown',e=>{
@@ -303,10 +388,14 @@
     const f1=stack1.querySelector('iframe.visible'); if(f1) f1.src=addTs(stack1.dataset.url||'');
     const f2=stack2.querySelector('iframe.visible'); if(f2) f2.src=addTs(stack2.dataset.url||'');
     applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-    updatePlayLabel(); go(0);
-    ctrl.classList.add('show'); setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
+
+    updatePlayLabel();
+    rebuildFlow(false);
+    go(0);
+
+    ctrl.classList.add('show');
+    setTimeout(()=>ctrl.classList.remove('show'),CTRL_AUTOHIDE_MS);
   });
 </script>
 </body>
 </html>
-
