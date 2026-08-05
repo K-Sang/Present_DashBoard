@@ -3,99 +3,245 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Slideshow: Looker + WebLink + (Optional) Image/YouTube — Auto + Top-Right Controls</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Present Dashboard - Fixed</title>
   <style>
-    :root { --bg:#ffffff; }
-    html,body{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:var(--bg);font-family:system-ui,sans-serif;}
-    .container{position:absolute;inset:0;display:none;width:100vw;height:100vh;background:var(--bg);}
-    .container.active{display:block;}
-
-    /* Looker double-buffer */
-    .dash-wrap{position:relative;width:100%;height:100%;}
-    .stack{position:relative;width:100%;height:100%;}
-    .stack>iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg);opacity:0;pointer-events:none;transition:opacity 300ms ease;}
-    .stack>iframe.visible{opacity:1;pointer-events:auto;}
-
-    /* Image / Video */
-    img{width:100%;height:100%;object-fit:contain;display:block;background:var(--bg);}
-    #youtube-iframe{width:100%;height:100%;}
-
-    /* WebLink zoom (ẩn UI) */
-    #weblink{background:#fff;}
-    .weblink-outer{position:absolute;inset:0;overflow:auto;background:#fff;}
-    .weblink-inner{
-      width:calc(100% / var(--zoom,1));
-      height:calc(100% / var(--zoom,1));
-      transform:scale(var(--zoom,1));
-      transform-origin:top left;
+    :root {
+      --bg: #ffffff;
+      --ctrl-scale: 1;
     }
-    .weblink-inner>iframe{width:100%;height:100%;border:0;background:#fff;}
 
-    /* ===== Control panel (top-right + scalable) ===== */
+    html,
+    body {
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .container {
+      position: absolute;
+      inset: 0;
+      display: none;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+    }
+
+    .container.active {
+      display: block;
+    }
+
+    .dash-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #fff;
+    }
+
+    .fit-wrap {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .fit-stage {
+      width: var(--fit-width, 1160px);
+      height: var(--fit-height, 1080px);
+      flex: 0 0 auto;
+      background: #fff;
+      transform: scale(var(--fit-scale, 1));
+      transform-origin: center;
+    }
+
+    .stack {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #fff;
+    }
+
+    .stack > iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 300ms ease;
+    }
+
+    .stack > iframe.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #weblink {
+      background: #fff;
+    }
+
+    .weblink-outer {
+      position: absolute;
+      inset: 0;
+      overflow: auto;
+      background: #fff;
+    }
+
+    .weblink-inner {
+      width: calc(100% / var(--zoom, 1));
+      height: calc(100% / var(--zoom, 1));
+      transform: scale(var(--zoom, 1));
+      transform-origin: top left;
+      background: #fff;
+    }
+
+    .weblink-inner > iframe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+    }
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: var(--bg);
+    }
+
+    #youtube-iframe {
+      width: 100%;
+      height: 100%;
+    }
+
     .ctrl {
-      position:fixed; right:10px; top:10px;
-      display:flex; align-items:center; gap:8px;
-      background:rgba(0,0,0,.55); color:#fff; padding:6px 10px;
-      border-radius:12px; backdrop-filter:blur(4px); z-index:9999;
-      opacity:0; pointer-events:none; transition:opacity .25s ease, transform .1s ease;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      color: #fff;
+      background: rgba(17, 24, 39, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(var(--ctrl-scale, 1));
       transform-origin: top right;
-    }
-    .ctrl.show{opacity:1; pointer-events:auto;}
-    .ctrl.scaled{ transform: scale(var(--ctrl-scale,1)); }
-    .ctrl button{
-      border:0; border-radius:8px; padding:6px 10px; font-weight:600;
-      cursor:pointer;
+      transition: opacity 0.25s ease;
+      backdrop-filter: blur(6px);
     }
 
-    /* ===== Dropdown Screen Picker (xổ xuống) ===== */
-    .dropdown{ position:relative; }
-
-    .dropdown-btn{
-      border:0;
-      border-radius:8px;
-      padding:6px 12px;
-      font-weight:700;
-      cursor:pointer;
-      background:#fff;
-      color:#000;
+    .ctrl.show {
+      opacity: 1;
+      pointer-events: auto;
     }
 
-    .dropdown-menu{
-      position:absolute;
-      top:110%;
-      right:0;
-      min-width:190px;
-      background:rgba(0,0,0,.88);
-      border-radius:10px;
-      padding:10px 12px;
-      display:none;
-      flex-direction:column;
-      gap:8px;
-      z-index:10000;
-      box-shadow:0 8px 22px rgba(0,0,0,.35);
+    .ctrl button {
+      border: 0;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-weight: 700;
+      cursor: pointer;
+      color: #111827;
+      background: #fff;
+      white-space: nowrap;
     }
 
-    .dropdown-menu label{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      font-size:13px;
-      font-weight:650;
-      color:#fff;
-      cursor:pointer;
-      white-space:nowrap;
-      user-select:none;
+    .dropdown {
+      position: relative;
     }
 
-    .dropdown-menu input{ cursor:pointer; }
-    .dropdown.open .dropdown-menu{ display:flex; }
+    .dropdown-menu {
+      position: absolute;
+      top: 110%;
+      right: 0;
+      z-index: 10000;
+      display: none;
+      min-width: 210px;
+      padding: 10px 12px;
+      flex-direction: column;
+      gap: 8px;
+      background: rgba(17, 24, 39, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+    }
+
+    .dropdown.open .dropdown-menu {
+      display: flex;
+    }
+
+    .dropdown-menu label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 650;
+      white-space: nowrap;
+      user-select: none;
+      cursor: pointer;
+    }
+
+    .dropdown-menu label.is-disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .dropdown-menu input {
+      cursor: pointer;
+    }
+
+    .dropdown-menu input:disabled {
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 760px) {
+      .ctrl {
+        right: 6px;
+        gap: 6px;
+        padding: 5px 7px;
+        transform: scale(0.9);
+      }
+
+      .ctrl button {
+        padding: 5px 8px;
+        font-size: 12px;
+      }
+    }
   </style>
 </head>
 <body>
+  <!-- LOOKER - ANDON dashboard from the screenshot -->
+  <div class="container active" id="lookerAndon" data-kind="looker">
+    <div class="fit-wrap">
+      <div class="fit-stage" id="andonFitStage">
+      <div class="stack" id="stackAndon"
+           data-url="https://datastudio.google.com/embed/reporting/d2ac24e4-8519-41e2-9d58-2ccca366a200/page/p_2hs3lhru5d?rm=minimal&chromeless=1">
+        <iframe class="visible" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      </div>
+    </div>
+  </div>
 
-  <!-- LOOKER #1 -->
-  <div class="container active" id="looker1">
+  <!-- LOOKER #1 from the current file -->
+  <div class="container" id="looker1" data-kind="looker">
     <div class="dash-wrap">
       <div class="stack" id="stack1"
            data-url="https://lookerstudio.google.com/embed/reporting/253ec4e8-26bf-40af-aec6-7c8507f1f3df/page/v4lxC?rm=minimal&chromeless=1">
@@ -104,8 +250,8 @@
     </div>
   </div>
 
-  <!-- LOOKER #2 -->
-  <div class="container" id="looker2">
+  <!-- LOOKER #2 from the current file -->
+  <div class="container" id="looker2" data-kind="looker">
     <div class="dash-wrap">
       <div class="stack" id="stack2"
            data-url="https://lookerstudio.google.com/embed/reporting/36b6b653-e30a-4f13-bc29-400c9e35fa63/page/p_n0r1ltpexd?rm=minimal&chromeless=1">
@@ -116,7 +262,7 @@
 
   <!-- WEB LINK -->
   <div class="container" id="weblink">
-    <div class="weblink-outer" id="weblinkOuter" style="--zoom:0.90">
+    <div class="weblink-outer" id="weblinkOuter" style="--zoom: 0.9">
       <div class="weblink-inner">
         <iframe id="weblink-iframe" referrerpolicy="strict-origin-when-cross-origin" allow="fullscreen; clipboard-write"></iframe>
       </div>
@@ -125,7 +271,7 @@
 
   <!-- IMAGE (optional) -->
   <div class="container" id="image">
-    <img src="images/4minute.png" alt="Slide ảnh">
+    <img src="images/4minute.png" alt="Slide ảnh" />
   </div>
 
   <!-- VIDEO (YouTube) -->
@@ -133,351 +279,537 @@
     <div id="youtube-iframe"></div>
   </div>
 
-  <!-- Control Panel -->
-  <div class="ctrl scaled" id="ctrl" style="--ctrl-scale:1">
-    <button id="btnPrev">◀ Prev</button>
-    <button id="btnPlayPause">⏸ Pause</button>
+  <div class="ctrl" id="ctrl">
+    <button id="btnPrev">Prev</button>
+    <button id="btnPlayPause">Pause</button>
 
-    <!-- Dropdown listbox -->
     <div class="dropdown" id="screenDropdown">
-      <button class="dropdown-btn" id="btnScreens">Screens ▾</button>
+      <button id="btnScreens">Screens</button>
       <div class="dropdown-menu" id="screenPicker" title="Chọn màn cần chạy">
-        <label><input type="checkbox" data-screen="looker1" checked> Looker 1</label>
-        <label><input type="checkbox" data-screen="looker2" checked> Looker 2</label>
-        <label><input type="checkbox" data-screen="weblink" checked> WebLink</label>
-        <label><input type="checkbox" data-screen="image"> Image</label>
-        <label><input type="checkbox" data-screen="video" checked> YouTube</label>
+        <label><input type="checkbox" data-screen="lookerAndon" checked /> Looker Andon</label>
+        <label><input type="checkbox" data-screen="looker1" checked /> Looker 1</label>
+        <label><input type="checkbox" data-screen="looker2" checked /> Looker 2</label>
+        <label><input type="checkbox" data-screen="weblink" checked /> WebLink</label>
+        <label><input type="checkbox" data-screen="image" /> Image</label>
+        <label><input type="checkbox" data-screen="video" checked /> YouTube</label>
       </div>
     </div>
 
-    <button id="btnNext">Next ▶</button>
+    <button id="btnNext">Next</button>
   </div>
 
-<script>
-  /* ===== CONFIG ===== */
-  const SHOW_IMAGE           = false;   // nếu false: tick Image sẽ bị bỏ qua (an toàn)
-  const LOOKER_DURATION_MS   = 60000;
-  const WEBLINK_DURATION_MS  = 180000;
-  const IMAGE_DURATION_MS    = 240000;
-  const VIDEO_LIMIT_MS       = 147000;
-  const RELOAD_ON_SHOW       = true;
-  const FADE_MS              = 300;
+  <script>
+    const SHOW_IMAGE = false;
+    /* ===== CONFIG - chỉnh thời gian bằng giây ===== */
 
-  // WebLink
-  const WEBLINK_URL = 'https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall';
-  const WEBLINK_DEFAULT_ZOOM = 0.9;
-  const PERSIST_WEBLINK_STATE = true;
+    const ANDON_FIT_WIDTH = 2000;
+    const ANDON_FIT_HEIGHT = 1865;
+    const ANDON_DURATION_SEC = 300; // 5 phút cho riêng Looker Andon
+    const LOOKER_DURATION_SEC = 90; // 90 giây cho các Looker khác
+    const WEBLINK_DURATION_SEC = 180;
+    const IMAGE_DURATION_SEC = 240;
+    const VIDEO_LIMIT_SEC = 147;
+    const RELOAD_ON_SHOW = true;
+    const FADE_SEC = 0.3;
 
-  // Panel
-  const AUTOPLAY_DEFAULT = true;
-  const CTRL_AUTOHIDE_MS = 2500;
-  const CTRL_SCALE = 1.25;
+    const LOOKER_REFRESH_TIMEOUT_SEC = 20;
 
-  // YouTube
-  const YT_VIDEO_ID = 'nNfQOojFazA';
-  const YT_PRIVACY_MODE = false; // true = youtube-nocookie (nếu cần)
+    const WEBLINK_URL = "https://appdvn31.ap.averydennison.net:8443/ailidevoverall/device/overall";
+    const WEBLINK_DEFAULT_ZOOM = 0.9;
+    const PERSIST_WEBLINK_STATE = true;
 
-  /* ===== refs ===== */
-  const elL1=document.getElementById('looker1'),
-        elL2=document.getElementById('looker2'),
-        elWeb=document.getElementById('weblink'),
-        elImg=document.getElementById('image'),
-        elVid=document.getElementById('video');
+    const AUTOPLAY_DEFAULT = true;
+    const CTRL_AUTOHIDE_SEC = 2.5;
+    const CTRL_SCALE = 1.25;
 
-  const stack1=document.getElementById('stack1'),
-        stack2=document.getElementById('stack2'),
-        webIframe=document.getElementById('weblink-iframe'),
-        webOuter=document.getElementById('weblinkOuter');
+    const YT_VIDEO_ID = "nNfQOojFazA";
+    const YT_PRIVACY_MODE = false;
+    const YT_API_TIMEOUT_SEC = 10;
+    const YT_MAX_RETRIES = 3;
+    const YT_RETRY_BASE_SEC = 1;
+    const YT_RETRY_MAX_SEC = 6;
 
-  const ctrl=document.getElementById('ctrl'),
-        btnPrev=document.getElementById('btnPrev'),
-        btnNext=document.getElementById('btnNext'),
-        btnPlayPause=document.getElementById('btnPlayPause');
+    const SEC = 1000;
+    const ANDON_DURATION_MS = ANDON_DURATION_SEC * SEC;
+    const LOOKER_DURATION_MS = LOOKER_DURATION_SEC * SEC;
+    const WEBLINK_DURATION_MS = WEBLINK_DURATION_SEC * SEC;
+    const IMAGE_DURATION_MS = IMAGE_DURATION_SEC * SEC;
+    const VIDEO_LIMIT_MS = VIDEO_LIMIT_SEC * SEC;
+    const FADE_MS = FADE_SEC * SEC;
+    const LOOKER_REFRESH_TIMEOUT_MS = LOOKER_REFRESH_TIMEOUT_SEC * SEC;
+    const CTRL_AUTOHIDE_MS = CTRL_AUTOHIDE_SEC * SEC;
+    const YT_API_TIMEOUT_MS = YT_API_TIMEOUT_SEC * SEC;
+    const YT_RETRY_BASE_MS = YT_RETRY_BASE_SEC * SEC;
+    const YT_RETRY_MAX_MS = YT_RETRY_MAX_SEC * SEC;
 
-  const screenDropdown = document.getElementById('screenDropdown');
-  const btnScreens = document.getElementById('btnScreens');
-  const screenPicker = document.getElementById('screenPicker');
+    const screens = {
+      lookerAndon: document.getElementById("lookerAndon"),
+      looker1: document.getElementById("looker1"),
+      looker2: document.getElementById("looker2"),
+      weblink: document.getElementById("weblink"),
+      image: document.getElementById("image"),
+      video: document.getElementById("video")
+    };
 
-  let stageTimer=null, videoTimer=null;
-  let player=null;
+    const lookerStacks = {
+      lookerAndon: document.getElementById("stackAndon"),
+      looker1: document.getElementById("stack1"),
+      looker2: document.getElementById("stack2")
+    };
 
-  // FLOW build từ checkbox
-  let flow = [];
-  let idx=0, shownL1=false, shownL2=false, weblinkLoaded=false;
-  let autoplay=AUTOPLAY_DEFAULT, ctrlTimer=null;
+    const webIframe = document.getElementById("weblink-iframe");
+    const webOuter = document.getElementById("weblinkOuter");
+    const ctrl = document.getElementById("ctrl");
+    const btnPrev = document.getElementById("btnPrev");
+    const btnNext = document.getElementById("btnNext");
+    const btnPlayPause = document.getElementById("btnPlayPause");
+    const screenDropdown = document.getElementById("screenDropdown");
+    const btnScreens = document.getElementById("btnScreens");
+    const screenPicker = document.getElementById("screenPicker");
+    const andonFitStage = document.getElementById("andonFitStage");
 
-  /* ===== helpers ===== */
-  function setActive(name){
-    [elL1,elL2,elWeb,elImg,elVid].forEach(el=>el.classList.remove('active'));
-    const target = ({looker1:elL1,looker2:elL2,weblink:elWeb,image:elImg,video:elVid}[name]);
-    if(target) target.classList.add('active');
-  }
+    let stageTimer = null;
+    let videoTimer = null;
+    let player = null;
+    let ytLoadPromise = null;
+    let ytRetryCount = 0;
+    let videoSession = 0;
+    let flow = [];
+    let idx = 0;
+    let shownLooker = {};
+    let weblinkLoaded = false;
+    let autoplay = AUTOPLAY_DEFAULT;
+    let ctrlTimer = null;
+    let resizeTimer = null;
 
-  function clearTimers(){
-    [stageTimer,videoTimer].forEach(t=>t&&clearTimeout(t));
-    stageTimer=videoTimer=null;
-  }
+    function addTs(url) {
+      if (!url) return "";
+      const separator = url.includes("?") ? "&" : "?";
+      return `${url}${separator}_ts=${Date.now()}`;
+    }
 
-  function addTs(u){
-    const s=u.includes('?')?'&':'?';
-    return `${u}${s}_ts=${Date.now()}`;
-  }
+    function isActive(name) {
+      return screens[name] && screens[name].classList.contains("active");
+    }
 
-  function softRefresh(stack){
-    const base=stack.dataset.url||''; if(!base) return;
-    const old=stack.querySelector('iframe.visible');
-    const n=document.createElement('iframe');
-    n.allowFullscreen=true;
-    n.referrerPolicy='strict-origin-when-cross-origin';
-    n.src=addTs(base);
-    stack.appendChild(n);
+    function setActive(name) {
+      Object.values(screens).forEach((screen) => screen.classList.remove("active"));
+      if (screens[name]) screens[name].classList.add("active");
+    }
 
-    n.addEventListener('load',()=>{
-      requestAnimationFrame(()=>{
-        n.classList.add('visible');
-        if(old){
-          old.classList.remove('visible');
-          setTimeout(()=>old.remove(),FADE_MS+50);
-        }
+    function clearTimers() {
+      if (stageTimer) clearTimeout(stageTimer);
+      if (videoTimer) clearTimeout(videoTimer);
+      stageTimer = null;
+      videoTimer = null;
+    }
+
+    function stopVideo() {
+      videoSession += 1;
+      try {
+        if (player && player.stopVideo) player.stopVideo();
+      } catch (error) {}
+    }
+
+    function doTimer(ms) {
+      if (!autoplay) return;
+      stageTimer = setTimeout(next, ms);
+    }
+
+    function applyWeblinkZoom(value) {
+      const zoom = Math.max(0.5, Math.min(2, parseFloat(value) || 1));
+      webOuter.style.setProperty("--zoom", zoom);
+    }
+
+    function fitAndonDashboard() {
+      if (!andonFitStage) return;
+
+      const scale = Math.min(
+        window.innerWidth / ANDON_FIT_WIDTH,
+        window.innerHeight / ANDON_FIT_HEIGHT,
+        1
+      );
+
+      andonFitStage.style.setProperty("--fit-width", `${ANDON_FIT_WIDTH}px`);
+      andonFitStage.style.setProperty("--fit-height", `${ANDON_FIT_HEIGHT}px`);
+      andonFitStage.style.setProperty("--fit-scale", scale);
+    }
+
+    function softRefresh(stack) {
+      const base = stack.dataset.url || "";
+      if (!base) return;
+
+      const old = stack.querySelector("iframe.visible");
+      const nextFrame = document.createElement("iframe");
+      let finished = false;
+      const timeout = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        nextFrame.remove();
+      }, LOOKER_REFRESH_TIMEOUT_MS);
+
+      nextFrame.allowFullscreen = true;
+      nextFrame.referrerPolicy = "strict-origin-when-cross-origin";
+      nextFrame.addEventListener("load", () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+
+        requestAnimationFrame(() => {
+          nextFrame.classList.add("visible");
+          if (old) {
+            old.classList.remove("visible");
+            setTimeout(() => old.remove(), FADE_MS + 50);
+          }
+        });
+      }, { once: true });
+
+      nextFrame.addEventListener("error", () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        nextFrame.remove();
+      }, { once: true });
+
+      nextFrame.src = addTs(base);
+      stack.appendChild(nextFrame);
+    }
+
+    function isAvailableScreen(name) {
+      return name !== "image" || SHOW_IMAGE;
+    }
+
+    function syncPickerAvailability() {
+      screenPicker.querySelectorAll("input[type='checkbox'][data-screen]").forEach((checkbox) => {
+        const available = isAvailableScreen(checkbox.dataset.screen);
+        checkbox.disabled = !available;
+        if (!available) checkbox.checked = false;
+        const label = checkbox.closest("label");
+        if (label) label.classList.toggle("is-disabled", !available);
       });
-    },{once:true});
-  }
-
-  function applyWeblinkZoom(z){
-    webOuter.style.setProperty('--zoom', Math.max(0.5, Math.min(2, parseFloat(z)||1)));
-  }
-
-  /* ===== Dynamic flow from dropdown checkbox list ===== */
-  function getCheckedScreens(){
-    const cbs = [...screenPicker.querySelectorAll('input[type="checkbox"][data-screen]')];
-    const picked = cbs.filter(x => x.checked).map(x => x.dataset.screen);
-
-    // Chặn flow rỗng: nếu bỏ hết thì auto bật looker1
-    if(picked.length === 0){
-      const l1 = cbs.find(x => x.dataset.screen === 'looker1');
-      if(l1){ l1.checked = true; picked.push('looker1'); }
     }
 
-    // Nếu SHOW_IMAGE=false mà user tick Image thì bỏ qua (an toàn)
-    if(!SHOW_IMAGE) return picked.filter(s => s !== 'image');
-    return picked;
-  }
+    function getCheckedScreens() {
+      const checkboxes = [...screenPicker.querySelectorAll("input[type='checkbox'][data-screen]")];
+      const picked = checkboxes
+        .filter((checkbox) => checkbox.checked && !checkbox.disabled && screenHandlers[checkbox.dataset.screen])
+        .map((checkbox) => checkbox.dataset.screen);
 
-  function rebuildFlow(keepCurrent=true){
-    const currentName = flow[idx];
-    flow = getCheckedScreens();
+      if (picked.length > 0) return picked;
 
-    if(keepCurrent && currentName && flow.includes(currentName)){
-      idx = flow.indexOf(currentName);
-    }else{
-      idx = 0;
+      const fallback = checkboxes.find((checkbox) => !checkbox.disabled && screenHandlers[checkbox.dataset.screen]);
+      if (fallback) {
+        fallback.checked = true;
+        return [fallback.dataset.screen];
+      }
+
+      return ["lookerAndon"];
     }
-  }
 
-  function onPickerChange(){
-    const currentName = flow[idx];
-    rebuildFlow(false);
+    function rebuildFlow(keepCurrent = true) {
+      const currentName = flow[idx];
+      flow = getCheckedScreens();
 
-    if(currentName && !flow.includes(currentName)){
-      go(idx);
-    }else{
+      if (!flow.length) {
+        idx = 0;
+        return;
+      }
+
+      if (keepCurrent && currentName && flow.includes(currentName)) {
+        idx = flow.indexOf(currentName);
+      } else {
+        idx = 0;
+      }
+    }
+
+    function onPickerChange() {
+      rebuildFlow(false);
       go(idx);
     }
-  }
 
-  /* ===== YouTube API ===== */
-  function ensureYT(){
-    return new Promise(r=>{
-      if(window.YT && YT.Player) return r();
-      const s=document.createElement('script');
-      s.src = YT_PRIVACY_MODE ? 'https://www.youtube-nocookie.com/iframe_api' : 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(s);
-      window.onYouTubeIframeAPIReady=()=>r();
-    });
-  }
+    function ensureYT() {
+      if (window.YT && window.YT.Player) return Promise.resolve();
+      if (ytLoadPromise) return ytLoadPromise;
 
-  function createPlayerWithBust(){
-    try{ player && player.destroy && player.destroy(); }catch(e){}
+      const apiUrl = YT_PRIVACY_MODE
+        ? "https://www.youtube-nocookie.com/iframe_api"
+        : "https://www.youtube.com/iframe_api";
 
-    // Ensure mount is DIV
-    let mount=document.getElementById('youtube-iframe');
-    if(!mount || mount.tagName!=='DIV'){
-      if(mount) mount.remove();
-      mount=document.createElement('div');
-      mount.id='youtube-iframe';
-      elVid.appendChild(mount);
-    }else{
-      mount.innerHTML='';
+      const load = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("YouTube API timeout")), YT_API_TIMEOUT_MS);
+
+        window.onYouTubeIframeAPIReady = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+
+        let script = document.querySelector("script[data-youtube-api]");
+        if (!script) {
+          script = document.createElement("script");
+          script.dataset.youtubeApi = "true";
+          script.src = apiUrl;
+          document.head.appendChild(script);
+        }
+
+        script.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("YouTube API failed"));
+        };
+      });
+
+      ytLoadPromise = load.catch((error) => {
+        ytLoadPromise = null;
+        throw error;
+      });
+
+      return ytLoadPromise;
     }
 
-    const bust = Date.now();
-    player = new YT.Player('youtube-iframe',{
-      videoId: YT_VIDEO_ID,
-      playerVars: {
+    function createPlayerWithBust(session) {
+      if (session !== videoSession || !isActive("video")) return;
+
+      try {
+        if (player && player.destroy) player.destroy();
+      } catch (error) {}
+
+      let mount = document.getElementById("youtube-iframe");
+      if (!mount || mount.tagName !== "DIV") {
+        if (mount) mount.remove();
+        mount = document.createElement("div");
+        mount.id = "youtube-iframe";
+        screens.video.appendChild(mount);
+      } else {
+        mount.innerHTML = "";
+      }
+
+      const playerVars = {
         autoplay: 1,
         mute: 1,
         rel: 0,
         playsinline: 1,
         controls: 0,
         modestbranding: 1,
-        origin: location.origin,
-        cc_lang_pref: bust
-      },
-      events:{
-        onReady: ()=>{ try{ player.playVideo && player.playVideo(); }catch(e){}; },
-        onStateChange: e=>{
-          if(e.data===YT.PlayerState.ENDED){
-            clearTimers();
-            if(autoplay) next();
+        cc_lang_pref: Date.now()
+      };
+
+      if (location.origin && location.origin !== "null") {
+        playerVars.origin = location.origin;
+      }
+
+      player = new YT.Player("youtube-iframe", {
+        videoId: YT_VIDEO_ID,
+        playerVars,
+        events: {
+          onReady: () => {
+            if (session !== videoSession || !isActive("video")) return;
+            ytRetryCount = 0;
+            try {
+              if (player && player.playVideo) player.playVideo();
+            } catch (error) {}
+          },
+          onStateChange: (event) => {
+            if (session !== videoSession || !isActive("video")) return;
+            if (event.data === YT.PlayerState.ENDED) {
+              clearTimers();
+              if (autoplay) next();
+            }
+          },
+          onError: () => {
+            if (session !== videoSession || !isActive("video")) return;
+
+            ytRetryCount += 1;
+            if (ytRetryCount > YT_MAX_RETRIES) {
+              if (autoplay) next();
+              return;
+            }
+
+            const delay = Math.min(YT_RETRY_MAX_MS, YT_RETRY_BASE_MS * ytRetryCount);
+            setTimeout(() => {
+              if (session === videoSession && isActive("video")) createPlayerWithBust(session);
+            }, delay);
           }
-        },
-        onError: ()=>{
-          setTimeout(()=>{
-            try{ player && player.destroy && player.destroy(); }catch(e){}
-            createPlayerWithBust();
-          }, 250);
         }
+      });
+    }
+
+    async function reloadVideoHard(session) {
+      await ensureYT();
+      if (session !== videoSession || !isActive("video")) return;
+      createPlayerWithBust(session);
+    }
+
+    function showLooker(name) {
+      clearTimers();
+      setActive(name);
+      stopVideo();
+
+      const stack = lookerStacks[name];
+      if (stack && RELOAD_ON_SHOW && shownLooker[name]) {
+        softRefresh(stack);
+      }
+
+      shownLooker[name] = true;
+      if (name === "lookerAndon") {
+    	doTimer(ANDON_DURATION_MS);
+      } else {
+    	doTimer(LOOKER_DURATION_MS);
+      }
+    }
+
+    function showWebLink() {
+      clearTimers();
+      setActive("weblink");
+      stopVideo();
+      applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
+
+      if (!weblinkLoaded || !PERSIST_WEBLINK_STATE) {
+        webIframe.src = addTs(WEBLINK_URL);
+        weblinkLoaded = true;
+      }
+
+      doTimer(WEBLINK_DURATION_MS);
+    }
+
+    function showImage() {
+      if (!SHOW_IMAGE) {
+        next();
+        return;
+      }
+
+      clearTimers();
+      setActive("image");
+      stopVideo();
+      doTimer(IMAGE_DURATION_MS);
+    }
+
+    async function showVideo() {
+      clearTimers();
+      videoSession += 1;
+      ytRetryCount = 0;
+      const session = videoSession;
+
+      setActive("video");
+
+      try {
+        await reloadVideoHard(session);
+      } catch (error) {
+        if (session === videoSession && autoplay) {
+          stageTimer = setTimeout(next, 2000);
+        }
+        return;
+      }
+
+      if (autoplay && session === videoSession) {
+        videoTimer = setTimeout(() => {
+          if (session !== videoSession || !isActive("video")) return;
+          stopVideo();
+          next();
+        }, VIDEO_LIMIT_MS);
+      }
+    }
+
+    const screenHandlers = {
+      lookerAndon: () => showLooker("lookerAndon"),
+      looker1: () => showLooker("looker1"),
+      looker2: () => showLooker("looker2"),
+      weblink: showWebLink,
+      image: showImage,
+      video: showVideo
+    };
+
+    function go(targetIndex) {
+      if (!flow || flow.length === 0) rebuildFlow(false);
+      if (!flow.length) return;
+
+      idx = ((targetIndex % flow.length) + flow.length) % flow.length;
+      const name = flow[idx];
+      const handler = screenHandlers[name];
+      if (handler) handler();
+    }
+
+    function next() {
+      go(idx + 1);
+    }
+
+    function prev() {
+      go(idx - 1);
+    }
+
+    function updatePlayLabel() {
+      btnPlayPause.textContent = autoplay ? "Pause" : "Play";
+    }
+
+    ctrl.style.setProperty("--ctrl-scale", CTRL_SCALE);
+    btnPrev.onclick = prev;
+    btnNext.onclick = next;
+
+    btnPlayPause.onclick = () => {
+      autoplay = !autoplay;
+      updatePlayLabel();
+      go(idx);
+    };
+
+    screenPicker.addEventListener("change", (event) => {
+      if (event.target && event.target.matches("input[type='checkbox'][data-screen]")) {
+        onPickerChange();
       }
     });
-  }
 
-  async function reloadVideoHard(){
-    await ensureYT();
-    createPlayerWithBust();
-  }
+    btnScreens.onclick = (event) => {
+      event.stopPropagation();
+      screenDropdown.classList.toggle("open");
+    };
 
-  /* ===== screens ===== */
-  function doTimer(ms){
-    if(!autoplay) return;
-    stageTimer=setTimeout(next, ms);
-  }
+    screenPicker.addEventListener("click", (event) => event.stopPropagation());
+    document.addEventListener("click", () => screenDropdown.classList.remove("open"));
 
-  function showLooker1(){
-    clearTimers(); setActive('looker1');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    if(RELOAD_ON_SHOW && shownL1) softRefresh(stack1);
-    shownL1=true;
-    doTimer(LOOKER_DURATION_MS);
-  }
-
-  function showLooker2(){
-    clearTimers(); setActive('looker2');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    if(RELOAD_ON_SHOW && shownL2) softRefresh(stack2);
-    shownL2=true;
-    doTimer(LOOKER_DURATION_MS);
-  }
-
-  function showWebLink(){
-    clearTimers(); setActive('weblink');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-
-    if(!weblinkLoaded || !PERSIST_WEBLINK_STATE){
-      webIframe.src = addTs(WEBLINK_URL);
-      weblinkLoaded=true;
+    function showCtrl() {
+      ctrl.classList.add("show");
+      clearTimeout(ctrlTimer);
+      ctrlTimer = setTimeout(() => ctrl.classList.remove("show"), CTRL_AUTOHIDE_MS);
     }
-    doTimer(WEBLINK_DURATION_MS);
-  }
 
-  function showImage(){
-    clearTimers(); setActive('image');
-    try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
-    doTimer(IMAGE_DURATION_MS);
-  }
+    window.addEventListener("mousemove", showCtrl, { passive: true });
+    window.addEventListener("touchstart", showCtrl, { passive: true });
 
-  async function showVideo(){
-    clearTimers(); setActive('video');
-    await reloadVideoHard();
-    if(autoplay){
-      videoTimer=setTimeout(()=>{
-        try{ player && player.stopVideo && player.stopVideo(); }catch(e){}
+    window.addEventListener("keydown", (event) => {
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(event.target && event.target.tagName)) return;
+      if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
         next();
-      }, VIDEO_LIMIT_MS);
-    }
-  }
+      }
+      if (["ArrowLeft", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        prev();
+      }
+      if (event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        btnPlayPause.click();
+      }
+    });
 
-  function go(i){
-    if(!flow || flow.length===0) rebuildFlow(false);
-    idx=(i%flow.length+flow.length)%flow.length;
-    const name = flow[idx];
-    ({looker1:showLooker1,looker2:showLooker2,weblink:showWebLink,image:showImage,video:showVideo})[name]?.();
-  }
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fitAndonDashboard, 150);
+    }, { passive: true });
 
-  function next(){ go(idx+1); }
-  function prev(){ go(idx-1); }
+    document.addEventListener("DOMContentLoaded", () => {
+      syncPickerAvailability();
+      fitAndonDashboard();
 
-  /* ===== Controls ===== */
-  ctrl.style.setProperty('--ctrl-scale', CTRL_SCALE);
+      Object.values(lookerStacks).forEach((stack) => {
+        const frame = stack.querySelector("iframe.visible");
+        if (frame) frame.src = addTs(stack.dataset.url || "");
+      });
 
-  function updatePlayLabel(){
-    btnPlayPause.textContent = autoplay ? '⏸ Pause' : '▶ Play';
-  }
+      applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
+      updatePlayLabel();
+      rebuildFlow(false);
+      go(0);
 
-  btnPrev.onclick = ()=> prev();
-  btnNext.onclick = ()=> next();
-
-  btnPlayPause.onclick = ()=>{
-    autoplay=!autoplay;
-    updatePlayLabel();
-    go(idx); // refresh timers
-  };
-
-  // Checkbox changes
-  screenPicker.addEventListener('change', (e)=>{
-    if(e.target && e.target.matches('input[type="checkbox"][data-screen]')){
-      onPickerChange();
-    }
-  });
-
-  /* ===== Dropdown open/close ===== */
-  btnScreens.onclick = (e)=>{
-    e.stopPropagation();
-    screenDropdown.classList.toggle('open');
-  };
-
-  // Click inside menu should not close dropdown
-  screenPicker.addEventListener('click', (e)=> e.stopPropagation());
-
-  // Click outside closes dropdown
-  document.addEventListener('click', ()=> screenDropdown.classList.remove('open'));
-
-  /* ===== Ctrl auto-hide ===== */
-  function showCtrl(){
-    ctrl.classList.add('show');
-    clearTimeout(ctrlTimer);
-    ctrlTimer=setTimeout(()=>ctrl.classList.remove('show'), CTRL_AUTOHIDE_MS);
-  }
-  window.addEventListener('mousemove', showCtrl, {passive:true});
-  window.addEventListener('touchstart', showCtrl, {passive:true});
-
-  window.addEventListener('keydown', e=>{
-    if(['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName)) return;
-    if(['ArrowRight','PageDown',' '].includes(e.key)){ e.preventDefault(); next(); }
-    if(['ArrowLeft','PageUp'].includes(e.key)){ e.preventDefault(); prev(); }
-    if(e.key.toLowerCase()==='p'){ e.preventDefault(); btnPlayPause.click(); }
-  });
-
-  /* ===== boot ===== */
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const f1=stack1.querySelector('iframe.visible');
-    if(f1) f1.src = addTs(stack1.dataset.url||'');
-
-    const f2=stack2.querySelector('iframe.visible');
-    if(f2) f2.src = addTs(stack2.dataset.url||'');
-
-    applyWeblinkZoom(WEBLINK_DEFAULT_ZOOM);
-
-    updatePlayLabel();
-    rebuildFlow(false);
-    go(0);
-
-    ctrl.classList.add('show');
-    setTimeout(()=>ctrl.classList.remove('show'), CTRL_AUTOHIDE_MS);
-  });
-</script>
+      ctrl.classList.add("show");
+      setTimeout(() => ctrl.classList.remove("show"), CTRL_AUTOHIDE_MS);
+    });
+  </script>
 </body>
 </html>
-
-
-
