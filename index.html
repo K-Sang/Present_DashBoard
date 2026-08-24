@@ -120,9 +120,12 @@
       background: var(--bg);
     }
 
-    #youtube-iframe {
+    #drive-video-iframe {
+      display: block;
       width: 100%;
       height: 100%;
+      border: 0;
+      background: #000;
     }
 
     .ctrl {
@@ -274,9 +277,15 @@
     <img src="images/4minute.png" alt="Slide ảnh" />
   </div>
 
-  <!-- VIDEO (YouTube) -->
+  <!-- VIDEO (Google Drive) -->
   <div class="container" id="video">
-    <div id="youtube-iframe"></div>
+    <iframe
+      id="drive-video-iframe"
+      title="Video Google Drive"
+      allow="autoplay; fullscreen"
+      allowfullscreen
+      referrerpolicy="strict-origin-when-cross-origin">
+    </iframe>
   </div>
 
   <div class="ctrl" id="ctrl">
@@ -291,7 +300,7 @@
         <label><input type="checkbox" data-screen="looker2" checked /> Looker 2</label>
         <label><input type="checkbox" data-screen="weblink" checked /> WebLink</label>
         <label><input type="checkbox" data-screen="image" /> Image</label>
-        <label><input type="checkbox" data-screen="video" checked /> YouTube</label>
+        <label><input type="checkbox" data-screen="video" checked /> Google Drive Video</label>
       </div>
     </div>
 
@@ -308,6 +317,8 @@
     const LOOKER_DURATION_SEC = 90; // 90 giây cho các Looker khác
     const WEBLINK_DURATION_SEC = 180;
     const IMAGE_DURATION_SEC = 240;
+    // Đặt bằng thời lượng video. Google Drive không gửi sự kiện "video ended"
+    // cho trang HTML bên ngoài nên slideshow sẽ chuyển màn theo thời gian này.
     const VIDEO_LIMIT_SEC = 147;
     const RELOAD_ON_SHOW = true;
     const FADE_SEC = 0.3;
@@ -322,12 +333,10 @@
     const CTRL_AUTOHIDE_SEC = 2.5;
     const CTRL_SCALE = 1.25;
 
-    const YT_VIDEO_ID = "nNfQOojFazA";
-    const YT_PRIVACY_MODE = false;
-    const YT_API_TIMEOUT_SEC = 10;
-    const YT_MAX_RETRIES = 3;
-    const YT_RETRY_BASE_SEC = 1;
-    const YT_RETRY_MAX_SEC = 6;
+    // Dán nguyên link chia sẻ Google Drive hoặc chỉ File ID vào đây.
+    // Ví dụ: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+    const DRIVE_VIDEO_SOURCE = "https://drive.google.com/file/d/1tYQhK-WVlEqDnpvmmeV7I8Y0Wd327moA/view?usp=sharing";
+    const DRIVE_VIDEO_AUTOPLAY = true;
 
     const SEC = 1000;
     const ANDON_DURATION_MS = ANDON_DURATION_SEC * SEC;
@@ -338,9 +347,6 @@
     const FADE_MS = FADE_SEC * SEC;
     const LOOKER_REFRESH_TIMEOUT_MS = LOOKER_REFRESH_TIMEOUT_SEC * SEC;
     const CTRL_AUTOHIDE_MS = CTRL_AUTOHIDE_SEC * SEC;
-    const YT_API_TIMEOUT_MS = YT_API_TIMEOUT_SEC * SEC;
-    const YT_RETRY_BASE_MS = YT_RETRY_BASE_SEC * SEC;
-    const YT_RETRY_MAX_MS = YT_RETRY_MAX_SEC * SEC;
 
     const screens = {
       lookerAndon: document.getElementById("lookerAndon"),
@@ -359,6 +365,7 @@
 
     const webIframe = document.getElementById("weblink-iframe");
     const webOuter = document.getElementById("weblinkOuter");
+    const driveVideoIframe = document.getElementById("drive-video-iframe");
     const ctrl = document.getElementById("ctrl");
     const btnPrev = document.getElementById("btnPrev");
     const btnNext = document.getElementById("btnNext");
@@ -370,9 +377,6 @@
 
     let stageTimer = null;
     let videoTimer = null;
-    let player = null;
-    let ytLoadPromise = null;
-    let ytRetryCount = 0;
     let videoSession = 0;
     let flow = [];
     let idx = 0;
@@ -406,9 +410,7 @@
 
     function stopVideo() {
       videoSession += 1;
-      try {
-        if (player && player.stopVideo) player.stopVideo();
-      } catch (error) {}
+      if (driveVideoIframe) driveVideoIframe.src = "about:blank";
     }
 
     function doTimer(ms) {
@@ -475,8 +477,39 @@
       stack.appendChild(nextFrame);
     }
 
+    function getDriveVideoInfo(source) {
+      const value = String(source || "").trim();
+      if (!value) return null;
+
+      const fileMatch = value.match(/\/file\/d\/([^/?#]+)/i);
+      const idMatch = value.match(/[?&]id=([^&#]+)/i);
+      const rawIdMatch = value.match(/^[A-Za-z0-9_-]{10,}$/);
+      const fileId = fileMatch?.[1] || idMatch?.[1] || rawIdMatch?.[0] || "";
+      if (!fileId) return null;
+
+      const resourceKeyMatch = value.match(/[?&]resourcekey=([^&#]+)/i);
+      return {
+        fileId: decodeURIComponent(fileId),
+        resourceKey: resourceKeyMatch ? decodeURIComponent(resourceKeyMatch[1]) : ""
+      };
+    }
+
+    function buildDrivePreviewUrl(source) {
+      const info = getDriveVideoInfo(source);
+      if (!info) return "";
+
+      const params = new URLSearchParams();
+      if (DRIVE_VIDEO_AUTOPLAY) params.set("autoplay", "1");
+      if (info.resourceKey) params.set("resourcekey", info.resourceKey);
+
+      const query = params.toString();
+      return `https://drive.google.com/file/d/${encodeURIComponent(info.fileId)}/preview${query ? `?${query}` : ""}`;
+    }
+
     function isAvailableScreen(name) {
-      return name !== "image" || SHOW_IMAGE;
+      if (name === "image") return SHOW_IMAGE;
+      if (name === "video") return Boolean(buildDrivePreviewUrl(DRIVE_VIDEO_SOURCE));
+      return true;
     }
 
     function syncPickerAvailability() {
@@ -527,117 +560,6 @@
       go(idx);
     }
 
-    function ensureYT() {
-      if (window.YT && window.YT.Player) return Promise.resolve();
-      if (ytLoadPromise) return ytLoadPromise;
-
-      const apiUrl = YT_PRIVACY_MODE
-        ? "https://www.youtube-nocookie.com/iframe_api"
-        : "https://www.youtube.com/iframe_api";
-
-      const load = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("YouTube API timeout")), YT_API_TIMEOUT_MS);
-
-        window.onYouTubeIframeAPIReady = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-
-        let script = document.querySelector("script[data-youtube-api]");
-        if (!script) {
-          script = document.createElement("script");
-          script.dataset.youtubeApi = "true";
-          script.src = apiUrl;
-          document.head.appendChild(script);
-        }
-
-        script.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error("YouTube API failed"));
-        };
-      });
-
-      ytLoadPromise = load.catch((error) => {
-        ytLoadPromise = null;
-        throw error;
-      });
-
-      return ytLoadPromise;
-    }
-
-    function createPlayerWithBust(session) {
-      if (session !== videoSession || !isActive("video")) return;
-
-      try {
-        if (player && player.destroy) player.destroy();
-      } catch (error) {}
-
-      let mount = document.getElementById("youtube-iframe");
-      if (!mount || mount.tagName !== "DIV") {
-        if (mount) mount.remove();
-        mount = document.createElement("div");
-        mount.id = "youtube-iframe";
-        screens.video.appendChild(mount);
-      } else {
-        mount.innerHTML = "";
-      }
-
-      const playerVars = {
-        autoplay: 1,
-        mute: 1,
-        rel: 0,
-        playsinline: 1,
-        controls: 0,
-        modestbranding: 1,
-        cc_lang_pref: Date.now()
-      };
-
-      if (location.origin && location.origin !== "null") {
-        playerVars.origin = location.origin;
-      }
-
-      player = new YT.Player("youtube-iframe", {
-        videoId: YT_VIDEO_ID,
-        playerVars,
-        events: {
-          onReady: () => {
-            if (session !== videoSession || !isActive("video")) return;
-            ytRetryCount = 0;
-            try {
-              if (player && player.playVideo) player.playVideo();
-            } catch (error) {}
-          },
-          onStateChange: (event) => {
-            if (session !== videoSession || !isActive("video")) return;
-            if (event.data === YT.PlayerState.ENDED) {
-              clearTimers();
-              if (autoplay) next();
-            }
-          },
-          onError: () => {
-            if (session !== videoSession || !isActive("video")) return;
-
-            ytRetryCount += 1;
-            if (ytRetryCount > YT_MAX_RETRIES) {
-              if (autoplay) next();
-              return;
-            }
-
-            const delay = Math.min(YT_RETRY_MAX_MS, YT_RETRY_BASE_MS * ytRetryCount);
-            setTimeout(() => {
-              if (session === videoSession && isActive("video")) createPlayerWithBust(session);
-            }, delay);
-          }
-        }
-      });
-    }
-
-    async function reloadVideoHard(session) {
-      await ensureYT();
-      if (session !== videoSession || !isActive("video")) return;
-      createPlayerWithBust(session);
-    }
-
     function showLooker(name) {
       clearTimers();
       setActive(name);
@@ -682,22 +604,20 @@
       doTimer(IMAGE_DURATION_MS);
     }
 
-    async function showVideo() {
+    function showVideo() {
       clearTimers();
       videoSession += 1;
-      ytRetryCount = 0;
       const session = videoSession;
+      const previewUrl = buildDrivePreviewUrl(DRIVE_VIDEO_SOURCE);
 
       setActive("video");
 
-      try {
-        await reloadVideoHard(session);
-      } catch (error) {
-        if (session === videoSession && autoplay) {
-          stageTimer = setTimeout(next, 2000);
-        }
+      if (!previewUrl) {
+        if (autoplay) stageTimer = setTimeout(next, 2000);
         return;
       }
+
+      driveVideoIframe.src = addTs(previewUrl);
 
       if (autoplay && session === videoSession) {
         videoTimer = setTimeout(() => {
