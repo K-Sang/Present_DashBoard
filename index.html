@@ -318,7 +318,8 @@
     const WEBLINK_DURATION_SEC = 180;
     const IMAGE_DURATION_SEC = 240;
     // Đặt bằng thời lượng video. Google Drive không gửi sự kiện "video ended"
-    // cho trang HTML bên ngoài nên slideshow sẽ chuyển màn theo thời gian này.
+    // cho trang HTML bên ngoài. Khi slideshow Pause ở màn video,
+    // video sẽ tự phát lại từ đầu sau mỗi khoảng thời gian này.
     const VIDEO_LIMIT_SEC = 251;
     const RELOAD_ON_SHOW = true;
     const FADE_SEC = 0.3;
@@ -382,6 +383,7 @@
     let idx = 0;
     let shownLooker = {};
     let weblinkLoaded = false;
+    let videoStartedAt = 0;
     let autoplay = AUTOPLAY_DEFAULT;
     let ctrlTimer = null;
     let resizeTimer = null;
@@ -411,6 +413,7 @@
     function stopVideo() {
       videoSession += 1;
       if (driveVideoIframe) driveVideoIframe.src = "about:blank";
+      videoStartedAt = 0;
     }
 
     function doTimer(ms) {
@@ -504,6 +507,27 @@
 
       const query = params.toString();
       return `https://drive.google.com/file/d/${encodeURIComponent(info.fileId)}/preview${query ? `?${query}` : ""}`;
+    }
+
+    function loadDriveVideo(previewUrl) {
+      videoStartedAt = Date.now();
+      driveVideoIframe.src = addTs(previewUrl);
+    }
+
+    function scheduleVideoCompletion(previewUrl, session, delay = VIDEO_LIMIT_MS) {
+      videoTimer = setTimeout(() => {
+        videoTimer = null;
+        if (session !== videoSession || !isActive("video")) return;
+
+        if (autoplay) {
+          stopVideo();
+          next();
+          return;
+        }
+
+        loadDriveVideo(previewUrl);
+        scheduleVideoCompletion(previewUrl, session);
+      }, Math.max(0, delay));
     }
 
     function isAvailableScreen(name) {
@@ -617,15 +641,8 @@
         return;
       }
 
-      driveVideoIframe.src = addTs(previewUrl);
-
-      if (autoplay && session === videoSession) {
-        videoTimer = setTimeout(() => {
-          if (session !== videoSession || !isActive("video")) return;
-          stopVideo();
-          next();
-        }, VIDEO_LIMIT_MS);
-      }
+      loadDriveVideo(previewUrl);
+      scheduleVideoCompletion(previewUrl, session);
     }
 
     const screenHandlers = {
@@ -666,6 +683,19 @@
     btnPlayPause.onclick = () => {
       autoplay = !autoplay;
       updatePlayLabel();
+
+      if (isActive("video")) {
+        const previewUrl = buildDrivePreviewUrl(DRIVE_VIDEO_SOURCE);
+        if (!previewUrl || !videoStartedAt) return;
+
+        const elapsed = Date.now() - videoStartedAt;
+        const remaining = Math.max(0, VIDEO_LIMIT_MS - elapsed);
+        const session = videoSession;
+        clearTimers();
+        scheduleVideoCompletion(previewUrl, session, remaining);
+        return;
+      }
+
       go(idx);
     };
 
