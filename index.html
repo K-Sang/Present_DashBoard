@@ -253,12 +253,14 @@
     </div>
   </div>
 
-  <!-- LOOKER #2 from the current file -->
+  <!-- LOOKER ANDON 2 -->
   <div class="container" id="looker2" data-kind="looker">
-    <div class="dash-wrap">
+    <div class="fit-wrap">
+      <div class="fit-stage" id="andon2FitStage">
       <div class="stack" id="stack2"
-           data-url="https://lookerstudio.google.com/embed/reporting/36b6b653-e30a-4f13-bc29-400c9e35fa63/page/p_n0r1ltpexd?rm=minimal&chromeless=1">
+           data-url="https://datastudio.google.com/embed/reporting/d2eb6146-fc9f-4032-8932-3cfab78a0782/page/p_2hs3lhru5d?rm=minimal&chromeless=1">
         <iframe class="visible" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
       </div>
     </div>
   </div>
@@ -296,8 +298,8 @@
       <button id="btnScreens">Screens</button>
       <div class="dropdown-menu" id="screenPicker" title="Chọn màn cần chạy">
         <label><input type="checkbox" data-screen="lookerAndon" checked /> Looker Andon</label>
+        <label><input type="checkbox" data-screen="looker2" checked /> Looker Andon 2</label>
         <label><input type="checkbox" data-screen="looker1" checked /> Looker 1</label>
-        <label><input type="checkbox" data-screen="looker2" checked /> Looker 2</label>
         <label><input type="checkbox" data-screen="weblink" checked /> WebLink</label>
         <label><input type="checkbox" data-screen="image" /> Image</label>
         <label><input type="checkbox" data-screen="video" checked /> Google Drive Video</label>
@@ -311,16 +313,19 @@
     const SHOW_IMAGE = false;
     /* ===== CONFIG - chỉnh thời gian bằng giây ===== */
 
+    // Kích thước và cách fit dùng chung cho Looker Andon và Looker Andon 2.
     const ANDON_FIT_WIDTH = 2000;
     const ANDON_FIT_HEIGHT = 1865;
     const ANDON_DURATION_SEC = 300; // 5 phút cho riêng Looker Andon
-    const LOOKER_DURATION_SEC = 90; // 90 giây cho các Looker khác
+    const LOOKER_DURATION_SEC = 90; // Looker 1
+    const ANDON_2_DURATION_SEC = 300; // Looker Andon 2: 4 phút
     const WEBLINK_DURATION_SEC = 180;
     const IMAGE_DURATION_SEC = 240;
-    // Đặt bằng thời lượng video. Google Drive không gửi sự kiện "video ended"
-    // cho trang HTML bên ngoài. Khi slideshow Pause ở màn video,
-    // video sẽ tự phát lại từ đầu sau mỗi khoảng thời gian này.
-    const VIDEO_LIMIT_SEC = 20;
+    // Thời gian tính từ lúc yêu cầu tải iframe, có bao gồm thời gian tải Drive.
+    const VIDEO_LIMIT_SEC = 20;       // Thời lượng mỗi lượt; chỉnh khi thay video
+    const VIDEO_LOOP_ENABLED = true; // true: bật lặp; false: chỉ phát một lượt
+    const VIDEO_LOOP_TOTAL_SEC = 60; // Tổng thời gian màn video khi bật lặp
+    // Pause dừng chuyển màn; video chỉ tiếp tục lặp nếu VIDEO_LOOP_ENABLED = true.
     const RELOAD_ON_SHOW = true;
     const FADE_SEC = 0.3;
 
@@ -342,9 +347,13 @@
     const SEC = 1000;
     const ANDON_DURATION_MS = ANDON_DURATION_SEC * SEC;
     const LOOKER_DURATION_MS = LOOKER_DURATION_SEC * SEC;
+    const ANDON_2_DURATION_MS = ANDON_2_DURATION_SEC * SEC;
     const WEBLINK_DURATION_MS = WEBLINK_DURATION_SEC * SEC;
     const IMAGE_DURATION_MS = IMAGE_DURATION_SEC * SEC;
-    const VIDEO_LIMIT_MS = VIDEO_LIMIT_SEC * SEC;
+    const VIDEO_LIMIT_MS = Math.max(1, Number(VIDEO_LIMIT_SEC) || 20) * SEC;
+    const VIDEO_TOTAL_MS = VIDEO_LOOP_ENABLED
+      ? Math.max(1, Number(VIDEO_LOOP_TOTAL_SEC) || 60) * SEC
+      : VIDEO_LIMIT_MS;
     const FADE_MS = FADE_SEC * SEC;
     const LOOKER_REFRESH_TIMEOUT_MS = LOOKER_REFRESH_TIMEOUT_SEC * SEC;
     const CTRL_AUTOHIDE_MS = CTRL_AUTOHIDE_SEC * SEC;
@@ -374,7 +383,10 @@
     const screenDropdown = document.getElementById("screenDropdown");
     const btnScreens = document.getElementById("btnScreens");
     const screenPicker = document.getElementById("screenPicker");
-    const andonFitStage = document.getElementById("andonFitStage");
+    const andonFitStages = [
+      document.getElementById("andonFitStage"),
+      document.getElementById("andon2FitStage")
+    ].filter(Boolean);
 
     let stageTimer = null;
     let videoTimer = null;
@@ -384,6 +396,8 @@
     let shownLooker = {};
     let weblinkLoaded = false;
     let videoStartedAt = 0;
+    let videoRemainingMs = 0;
+    let videoBudgetStartedAt = null;
     let autoplay = AUTOPLAY_DEFAULT;
     let ctrlTimer = null;
     let resizeTimer = null;
@@ -414,6 +428,8 @@
       videoSession += 1;
       if (driveVideoIframe) driveVideoIframe.src = "about:blank";
       videoStartedAt = 0;
+      videoRemainingMs = 0;
+      videoBudgetStartedAt = null;
     }
 
     function doTimer(ms) {
@@ -427,17 +443,17 @@
     }
 
     function fitAndonDashboard() {
-      if (!andonFitStage) return;
-
       const scale = Math.min(
         window.innerWidth / ANDON_FIT_WIDTH,
         window.innerHeight / ANDON_FIT_HEIGHT,
         1
       );
 
-      andonFitStage.style.setProperty("--fit-width", `${ANDON_FIT_WIDTH}px`);
-      andonFitStage.style.setProperty("--fit-height", `${ANDON_FIT_HEIGHT}px`);
-      andonFitStage.style.setProperty("--fit-scale", scale);
+      andonFitStages.forEach((stage) => {
+        stage.style.setProperty("--fit-width", `${ANDON_FIT_WIDTH}px`);
+        stage.style.setProperty("--fit-height", `${ANDON_FIT_HEIGHT}px`);
+        stage.style.setProperty("--fit-scale", scale);
+      });
     }
 
     function softRefresh(stack) {
@@ -514,20 +530,45 @@
       driveVideoIframe.src = addTs(previewUrl);
     }
 
-    function scheduleVideoCompletion(previewUrl, session, delay = VIDEO_LIMIT_MS) {
+    function settleVideoBudget() {
+      if (videoBudgetStartedAt !== null) {
+        videoRemainingMs = Math.max(0, videoRemainingMs - (Date.now() - videoBudgetStartedAt));
+        videoBudgetStartedAt = null;
+      }
+    }
+
+    function scheduleVideoCompletion(previewUrl, session) {
+      if (session !== videoSession || !isActive("video")) return;
+      settleVideoBudget();
+      if (autoplay && videoRemainingMs <= 0) {
+        stopVideo();
+        next();
+        return;
+      }
+
+      const cycleRemaining = Math.max(0, VIDEO_LIMIT_MS - (Date.now() - videoStartedAt));
+      // Khi tắt loop và Pause, giữ màn hiện tại, không tải lại video.
+      if (!autoplay && !VIDEO_LOOP_ENABLED) return;
+      const delay = autoplay ? Math.min(cycleRemaining, videoRemainingMs) : cycleRemaining;
+      if (autoplay) videoBudgetStartedAt = Date.now();
+
       videoTimer = setTimeout(() => {
         videoTimer = null;
         if (session !== videoSession || !isActive("video")) return;
-
-        if (autoplay) {
+        settleVideoBudget();
+        if (autoplay && videoRemainingMs <= 0) {
           stopVideo();
           next();
           return;
         }
-
-        loadDriveVideo(previewUrl);
-        scheduleVideoCompletion(previewUrl, session);
-      }, Math.max(0, delay));
+        if (VIDEO_LOOP_ENABLED) {
+          loadDriveVideo(previewUrl);
+          scheduleVideoCompletion(previewUrl, session);
+        } else if (autoplay) {
+          stopVideo();
+          next();
+        }
+      }, delay);
     }
 
     function isAvailableScreen(name) {
@@ -597,6 +638,8 @@
       shownLooker[name] = true;
       if (name === "lookerAndon") {
     	doTimer(ANDON_DURATION_MS);
+      } else if (name === "looker2") {
+        doTimer(ANDON_2_DURATION_MS);
       } else {
     	doTimer(LOOKER_DURATION_MS);
       }
@@ -641,6 +684,8 @@
         return;
       }
 
+      videoRemainingMs = VIDEO_TOTAL_MS;
+      videoBudgetStartedAt = null;
       loadDriveVideo(previewUrl);
       scheduleVideoCompletion(previewUrl, session);
     }
@@ -688,11 +733,9 @@
         const previewUrl = buildDrivePreviewUrl(DRIVE_VIDEO_SOURCE);
         if (!previewUrl || !videoStartedAt) return;
 
-        const elapsed = Date.now() - videoStartedAt;
-        const remaining = Math.max(0, VIDEO_LIMIT_MS - elapsed);
         const session = videoSession;
         clearTimers();
-        scheduleVideoCompletion(previewUrl, session, remaining);
+        scheduleVideoCompletion(previewUrl, session);
         return;
       }
 
